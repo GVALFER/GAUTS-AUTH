@@ -23,8 +23,8 @@ npm install @gauts/auth redis hono
 ## Setup
 
 ```ts
-import { createAuth, type SessionRecords } from "@gauts/auth";
-import { createHonoAdapter } from "@gauts/auth/hono";
+import type { SessionRecords } from "@gauts/auth";
+import { createHonoAuth } from "@gauts/auth/hono";
 import { createRedisStore } from "@gauts/auth/redis";
 
 const records: SessionRecords = {
@@ -44,7 +44,8 @@ type AccountSession = {
   role: "owner" | "admin";
 };
 
-const auth = createAuth<AccountSession>({
+const auth = createHonoAuth<AccountSession>({
+  getIp: (c) => getTrustedClientIp(c),
   redis: createRedisStore({ client: redis, config: { prefix: "my-app:auth" } }),
   records,
   session: {
@@ -53,11 +54,6 @@ const auth = createAuth<AccountSession>({
     max: 10,
     validation: ["userAgent"],
   },
-});
-
-const hono = createHonoAdapter({
-  auth,
-  getIp: (c) => getTrustedClientIp(c),
 });
 ```
 
@@ -100,7 +96,8 @@ const valid = await auth.password.verify({ password, storedHash: hash });
 Applications whose database contains bcrypt hashes select bcrypt explicitly:
 
 ```ts
-const auth = createAuth({
+const auth = createHonoAuth({
+  getIp: (c) => getTrustedClientIp(c),
   password: {
     algorithm: "bcrypt",
   },
@@ -140,7 +137,7 @@ app.post("/auth/login", async (c) => {
     return c.json({ error: "Invalid credentials." }, 401);
   }
 
-  const session = await hono.createSession({
+  const session = await auth.createSession({
     accountId: account.id,
     context: c,
     data: {
@@ -158,32 +155,21 @@ Applications must apply their own login rate limiting and account-enumeration pr
 ## Protected routes
 
 ```ts
-app.get("/account", hono.requireSession, async (c) => {
+app.get("/account", auth.requireSession, async (c) => {
   const session = c.get("session");
-  const account = await findAccountById(session.accountId);
+  const account = c.get("account");
 
-  return c.json({ account });
+  return c.json({ account, sessionId: session.id });
 });
 ```
 
-The middleware reads the cookie, resolves Redis, compares the configured client fields, renews expiry when due, and places the typed session in the Hono context. It does not load application data from the database.
-
-Applications that need to populate additional Hono context variables can resolve through the same adapter without duplicating its cookie behavior:
-
-```ts
-const requireAccount = async (c, next) => {
-  const session = await hono.resolveSession(c);
-
-  c.set("account", session.data);
-  await next();
-};
-```
+The middleware reads the cookie, resolves Redis, compares the configured client fields, renews expiry when due, and places both the typed `session` and its `account` data in the Hono context. It does not load application data from the database.
 
 ## Logout
 
 ```ts
 app.post("/auth/logout", async (c) => {
-  await hono.revokeSession(c);
+  await auth.revokeSession(c);
   return c.body(null, 204);
 });
 ```
@@ -253,7 +239,18 @@ session: {
 - Active sessions renew at most once every 24 hours.
 - Renewal keeps the same browser token.
 - There is no absolute session lifetime.
-- Every successful `resolve` call counts as activity and renews the session when due.
+- Every successful `resolve` call counts as HTTP activity and renews the session when due.
+
+Consumers that cannot deliver `Set-Cookie`, such as WebSocket handshakes, validate without renewing:
+
+```ts
+const session = await auth.session.validate({
+  client,
+  token,
+});
+```
+
+`validate` performs the same Redis, expiry, payload, and configured client-field checks as `resolve`. A client mismatch still revokes the backend session. It does not update `touchedAt`, Redis TTL, or the database expiry.
 
 ## Client validation
 
@@ -284,5 +281,5 @@ Exact IP validation is opt-in because VPN, mobile, and other networks can change
 ```text
 @gauts/auth        createAuth and public core types
 @gauts/auth/redis  createRedisStore
-@gauts/auth/hono   createHonoAdapter
+@gauts/auth/hono   createHonoAuth and createHonoAdapter
 ```

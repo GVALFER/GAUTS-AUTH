@@ -17,6 +17,7 @@ export type {
   RedisSessionStore,
   ResolvedSession,
   Session,
+  SessionInput,
   SessionRecord,
   SessionRecords,
   SessionService,

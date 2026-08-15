@@ -1,11 +1,12 @@
 import type { Context, Env, MiddlewareHandler } from "hono";
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
-import type { Auth } from "../../auth.js";
+import { createAuth, type Auth, type AuthDeps } from "../../auth.js";
 import type { SessionClientInput } from "../../client/index.js";
 import { createError, isAuthError } from "../../errors.js";
 import type { Session } from "../../session/types.js";
 
 export type HonoAuthVariables<TData extends object> = {
+  account: TData;
   session: Session<TData>;
 };
 
@@ -21,12 +22,19 @@ export type HonoCookieConfig = {
   secure?: boolean;
 };
 
+export type HonoGetIp = (
+  c: Context,
+) => Promise<string | null | undefined> | string | null | undefined;
+
 export type HonoAdapterConfig<TData extends object> = {
   auth: Auth<TData>;
   cookie?: HonoCookieConfig;
-  getIp: (
-    c: Context,
-  ) => Promise<string | null | undefined> | string | null | undefined;
+  getIp: HonoGetIp;
+};
+
+export type HonoAuthConfig = AuthDeps & {
+  cookie?: HonoCookieConfig;
+  getIp: HonoGetIp;
 };
 
 type CreateSessionInput<TData extends object> = {
@@ -43,6 +51,8 @@ export type HonoAdapter<TData extends object> = {
   resolveSession(c: Context): Promise<Session<TData>>;
   revokeSession(c: Context): Promise<string[]>;
 };
+
+export type HonoAuth<TData extends object> = Auth<TData> & HonoAdapter<TData>;
 
 const COOKIE_NAME_PATTERN = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
 
@@ -215,7 +225,10 @@ export const createHonoAdapter = <TData extends object>({
     c,
     next,
   ) => {
-    c.set("session", await resolveSession(c));
+    const session = await resolveSession(c);
+
+    c.set("session", session);
+    c.set("account", session.data);
     await next();
   };
 
@@ -235,5 +248,30 @@ export const createHonoAdapter = <TData extends object>({
     requireSession,
     resolveSession,
     revokeSession,
+  };
+};
+
+export const createHonoAuth = <TData extends object = Record<string, unknown>>({
+  cookie,
+  getIp,
+  password,
+  records,
+  redis,
+  session,
+}: HonoAuthConfig): HonoAuth<TData> => {
+  const auth = createAuth<TData>({
+    records,
+    redis,
+    ...(password === undefined ? {} : { password }),
+    ...(session === undefined ? {} : { session }),
+  });
+
+  return {
+    ...auth,
+    ...createHonoAdapter({
+      auth,
+      getIp,
+      ...(cookie === undefined ? {} : { cookie }),
+    }),
   };
 };

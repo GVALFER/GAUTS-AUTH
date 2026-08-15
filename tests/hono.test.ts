@@ -54,6 +54,9 @@ const createMockAuth = (
     async resolve(input) {
       return resolve(input.token);
     },
+    async validate(input) {
+      return (await resolve(input.token))?.session ?? null;
+    },
     async revoke() {
       return [];
     },
@@ -89,7 +92,10 @@ const createApp = (auth: Auth<Data>) => {
     return c.json({ code: "INTERNAL" }, 500);
   });
   app.get("/protected", adapter.requireSession, (c) =>
-    c.json({ accountId: c.get("session").accountId }),
+    c.json({
+      account: c.get("account"),
+      accountId: c.get("session").accountId,
+    }),
   );
 
   return { adapter, app };
@@ -109,7 +115,10 @@ describe("Hono adapter", () => {
     });
 
     assert.equal(response.status, 200);
-    assert.deepEqual(await response.json(), { accountId: "account-1" });
+    assert.deepEqual(await response.json(), {
+      account: session.data,
+      accountId: "account-1",
+    });
     assert.equal(response.headers.get("Set-Cookie"), null);
   });
 

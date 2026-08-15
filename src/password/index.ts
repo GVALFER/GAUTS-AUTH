@@ -1,6 +1,5 @@
 import * as argon2 from "argon2";
 import { compare as compareBcrypt, hash as hashBcrypt } from "bcryptjs";
-
 import type { ResolvedPasswordConfig } from "../config.js";
 import { createError } from "../errors.js";
 
@@ -10,15 +9,14 @@ export type PasswordService = {
   verify(input: { password: string; storedHash: string }): Promise<boolean>;
 };
 
-const BCRYPT_PATTERN = /^\$2[aby]\$\d{2}\$[./A-Za-z0-9]{53}$/;
-
-const requirePassword = ({
-  password,
-  maxBytes,
-}: {
+type RequirePasswordProps = {
   password: string;
   maxBytes: number;
-}) => {
+};
+
+const BCRYPT_PATTERN = /^\$2[aby]\$\d{2}\$[./A-Za-z0-9]{53}$/;
+
+const requirePassword = ({ password, maxBytes }: RequirePasswordProps) => {
   const bytes = Buffer.byteLength(password, "utf8");
 
   if (bytes < 1 || bytes > maxBytes) {

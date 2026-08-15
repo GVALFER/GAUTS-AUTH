@@ -38,7 +38,7 @@ export type CreateSession<TData extends object> = {
   data: TData;
 };
 
-export type ResolveSession = {
+export type SessionInput = {
   client: SessionClientInput;
   token: string;
 };
@@ -97,7 +97,8 @@ export type RedisSessionStore = {
 export type SessionService<TData extends object> = {
   create(input: CreateSession<TData>): Promise<CreatedSession<TData>>;
   list(accountId: string): Promise<ActiveSession[]>;
-  resolve(input: ResolveSession): Promise<ResolvedSession<TData> | null>;
+  resolve(input: SessionInput): Promise<ResolvedSession<TData> | null>;
+  validate(input: SessionInput): Promise<Session<TData> | null>;
   revoke(input: { accountId: string; sessionId: string }): Promise<string[]>;
   revokeAccount(accountId: string): Promise<string[]>;
   revokeToken(token: string): Promise<string[]>;

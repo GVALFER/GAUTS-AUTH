@@ -8,6 +8,7 @@ import { createToken, hashToken, tokenPattern } from "./token.js";
 import type {
   ActiveSession,
   RedisSessionStore,
+  SessionInput,
   SessionRecord,
   SessionRecords,
   SessionService,
@@ -24,6 +25,12 @@ type SessionDeps = {
 type RevokeRowsProps = {
   revokedAt: Date;
   rows: SessionRecord[];
+};
+
+type ValidatedSession<TData extends object> = {
+  current: Date;
+  stored: StoredSession<TData>;
+  tokenHash: string;
 };
 
 const toActiveSession = (session: SessionRecord): ActiveSession => ({
@@ -118,6 +125,67 @@ export const createSessionService = <TData extends object>({
     return ids;
   };
 
+  const validateSession = async (
+    input: SessionInput,
+  ): Promise<ValidatedSession<TData> | null> => {
+    if (!tokenPattern.test(input.token)) {
+      return null;
+    }
+
+    const tokenHash = hashToken(input.token);
+    const raw = await runRedis(() => redis.get(tokenHash));
+
+    if (!raw) {
+      return null;
+    }
+
+    const stored = parseSession<TData>(raw);
+
+    if (!stored) {
+      await runRedis(() => redis.delete([tokenHash]));
+      return null;
+    }
+
+    const current = now();
+
+    if (Date.parse(stored.expiresAt) <= current.getTime()) {
+      await runRedis(() => redis.delete([tokenHash]));
+      return null;
+    }
+
+    const client = normalizeClient(input.client);
+
+    const matches = matchesClient({
+      current: client,
+      stored: stored.client,
+      validation: config.validation,
+    });
+
+    if (!matches) {
+      await runRedis(() => redis.delete([tokenHash]));
+
+      try {
+        await runRecords(() =>
+          records.revoke({ revokedAt: current, sessionIds: [stored.id] }),
+        );
+      } catch (error) {
+        throw createError({
+          cause: error,
+          code: "SESSION_CLIENT_MISMATCH",
+          message:
+            "Session client identity changed and the session was revoked.",
+        });
+      }
+
+      throw createError({
+        code: "SESSION_CLIENT_MISMATCH",
+        message: "Session client identity changed and the session was revoked.",
+      });
+    }
+
+    return { current, stored, tokenHash };
+  };
+
   return {
     create: async (input) => {
       if (!input.accountId) {
@@ -192,61 +260,13 @@ export const createSessionService = <TData extends object>({
     },
 
     resolve: async (input) => {
-      if (!tokenPattern.test(input.token)) {
+      const validated = await validateSession(input);
+
+      if (!validated) {
         return null;
       }
 
-      const tokenHash = hashToken(input.token);
-      const raw = await runRedis(() => redis.get(tokenHash));
-
-      if (!raw) {
-        return null;
-      }
-
-      const stored = parseSession<TData>(raw);
-
-      if (!stored) {
-        await runRedis(() => redis.delete([tokenHash]));
-        return null;
-      }
-
-      const current = now();
-
-      if (Date.parse(stored.expiresAt) <= current.getTime()) {
-        await runRedis(() => redis.delete([tokenHash]));
-        return null;
-      }
-
-      const client = normalizeClient(input.client);
-
-      if (
-        !matchesClient({
-          current: client,
-          stored: stored.client,
-          validation: config.validation,
-        })
-      ) {
-        await runRedis(() => redis.delete([tokenHash]));
-
-        try {
-          await runRecords(() =>
-            records.revoke({ revokedAt: current, sessionIds: [stored.id] }),
-          );
-        } catch (error) {
-          throw createError({
-            cause: error,
-            code: "SESSION_CLIENT_MISMATCH",
-            message:
-              "Session client identity changed and the session was revoked.",
-          });
-        }
-
-        throw createError({
-          code: "SESSION_CLIENT_MISMATCH",
-          message:
-            "Session client identity changed and the session was revoked.",
-        });
-      }
+      const { current, stored, tokenHash } = validated;
 
       const due =
         current.getTime() - Date.parse(stored.touchedAt) >=
@@ -281,6 +301,11 @@ export const createSessionService = <TData extends object>({
       );
 
       return updated ? { renewed: true, session: toSession(renewed) } : null;
+    },
+
+    validate: async (input) => {
+      const validated = await validateSession(input);
+      return validated ? toSession(validated.stored) : null;
     },
 
     revokeToken: async (token) => {
@@ -351,9 +376,7 @@ export const createSessionService = <TData extends object>({
 
       await Promise.all(
         values.map(async (raw, index) => {
-          if (!raw) {
-            return;
-          }
+          if (!raw) return;
 
           const stored = parseSession<TData>(raw);
           const tokenHash = hashes[index];

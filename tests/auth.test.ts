@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import { createAuth } from "../src/auth.js";
+import { createHonoAuth } from "../src/adapters/hono/index.js";
 import { resolveSessionConfig } from "../src/config.js";
 import { isAuthError } from "../src/errors.js";
 import type {
@@ -32,6 +33,19 @@ describe("auth configuration", () => {
     const auth = createAuth({ records, redis });
 
     assert.equal(auth.password.algorithm, "argon2id");
+  });
+
+  it("creates one Hono auth instance with core and HTTP methods", () => {
+    const auth = createHonoAuth({
+      getIp: () => null,
+      records,
+      redis,
+    });
+
+    assert.equal(auth.password.algorithm, "argon2id");
+    assert.equal(typeof auth.session.resolve, "function");
+    assert.equal(typeof auth.requireSession, "function");
+    assert.equal(typeof auth.createSession, "function");
   });
 
   it("rejects incomplete adapters during startup", () => {

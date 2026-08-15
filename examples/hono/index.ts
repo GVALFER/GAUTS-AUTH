@@ -1,6 +1,6 @@
 import { Hono, type Context } from "hono";
-import { createAuth, isAuthError, type SessionRecords } from "@gauts/auth";
-import { createHonoAdapter, type HonoAuthEnv } from "@gauts/auth/hono";
+import { isAuthError, type SessionRecords } from "@gauts/auth";
+import { createHonoAuth, type HonoAuthEnv } from "@gauts/auth/hono";
 import { createRedisStore } from "@gauts/auth/redis";
 import type { RedisClientType } from "redis";
 
@@ -29,15 +29,14 @@ export const createApp = ({
   records,
   redis,
 }: ExampleDeps) => {
-  const auth = createAuth<AccountSession>({
+  const auth = createHonoAuth<AccountSession>({
+    getIp,
     records,
     redis: createRedisStore({
       client: redis,
       config: { prefix: "example:auth" },
     }),
   });
-
-  const hono = createHonoAdapter({ auth, getIp });
   const app = new Hono<HonoAuthEnv<AccountSession>>();
 
   app.onError((error, c) => {
@@ -67,7 +66,7 @@ export const createApp = ({
       return c.json({ error: "Invalid credentials." }, 401);
     }
 
-    const session = await hono.createSession({
+    const session = await auth.createSession({
       accountId: account.id,
       context: c,
       data: { email: account.email, role: account.role },
@@ -77,12 +76,12 @@ export const createApp = ({
   });
 
   app.post("/auth/logout", async (c) => {
-    await hono.revokeSession(c);
+    await auth.revokeSession(c);
     return c.body(null, 204);
   });
 
-  app.get("/account", hono.requireSession, (c) =>
-    c.json({ accountId: c.get("session").accountId }),
+  app.get("/account", auth.requireSession, (c) =>
+    c.json({ account: c.get("account") }),
   );
 
   return app;

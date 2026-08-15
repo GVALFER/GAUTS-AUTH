@@ -1,6 +1,6 @@
 {
   "name": "@gauts/auth",
-  "version": "0.2.0",
+  "version": "0.2.2",
   "description": "Framework-agnostic password and server-side session authentication for Node.js.",
   "license": "MIT",
   "author": "GVALFER",
@@ -55,8 +55,8 @@
     "format:check": "prettier --check .",
     "test": "node --import tsx --test tests/**/*.test.ts",
     "test:redis": "node --import tsx --test tests/redis.integration.test.ts",
-    "check": "npm run format:check && npm run lint && npm run typecheck && npm test",
-    "prepack": "npm run check && npm run build"
+    "check": "npm run build && npm run format:check && npm run lint && npm run typecheck && npm test",
+    "prepack": "npm run check"
   },
   "publishConfig": {
     "access": "public"

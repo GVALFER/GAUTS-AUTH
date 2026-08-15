@@ -211,6 +211,36 @@ describe("session service", () => {
     assert.match(created.token, tokenPattern);
   });
 
+  it("validates without renewing an elapsed session", async () => {
+    const harness = createHarness();
+    const created = await harness.session.create({
+      client,
+      data: { email: "owner@example.com", role: "owner" },
+      accountId: "account-1",
+    });
+
+    harness.advance(61);
+    const validated = await harness.session.validate({
+      client,
+      token: created.token,
+    });
+
+    assert.equal(validated?.id, created.session.id);
+    assert.equal(
+      validated?.expiresAt.getTime(),
+      created.session.expiresAt.getTime(),
+    );
+    assert.equal(harness.recordsCalls.updateExpiry, 0);
+    assert.equal(harness.redisCalls.update, 0);
+
+    const resolved = await harness.session.resolve({
+      client,
+      token: created.token,
+    });
+
+    assert.equal(resolved?.renewed, true);
+  });
+
   it("revokes the backend session on configured client mismatch", async () => {
     const harness = createHarness();
     const created = await harness.session.create({
@@ -249,7 +279,7 @@ describe("session service", () => {
     });
 
     await assert.rejects(
-      strict.session.resolve({
+      strict.session.validate({
         client: { ...client, ip: "2001:db8::2" },
         token: strictSession.token,
       }),
