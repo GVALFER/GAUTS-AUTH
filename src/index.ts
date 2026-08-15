@@ -5,6 +5,7 @@ export type {
   Argon2idConfig,
   PasswordConfig,
   SessionConfig,
+  SessionValidation,
 } from "./config.js";
 export { isAuthError } from "./errors.js";
 export type { AuthError, AuthErrorCode } from "./errors.js";
@@ -20,9 +21,4 @@ export type {
   SessionRecords,
   SessionService,
 } from "./session/types.js";
-export type {
-  SessionClient,
-  SessionClientInput,
-  SessionIdentity,
-  SessionIdentityInput,
-} from "./client/index.js";
+export type { SessionClient, SessionClientInput } from "./client/index.js";

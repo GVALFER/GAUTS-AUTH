@@ -18,10 +18,13 @@ export type BcryptConfig = {
 
 export type PasswordConfig = Argon2idConfig | BcryptConfig;
 
+export type SessionValidation = "ip" | "platform" | "userAgent";
+
 export type SessionConfig = {
   max?: number;
-  touchAfter?: number;
+  renewInterval?: number;
   ttl?: number;
+  validation?: readonly SessionValidation[];
 };
 
 type ResolvedArgon2idConfig = {
@@ -45,8 +48,9 @@ export type ResolvedPasswordConfig =
 
 export type ResolvedSessionConfig = {
   max: number;
-  touchAfter: number;
+  renewInterval: number;
   ttl: number;
+  validation: readonly SessionValidation[];
 };
 
 type IntegerRequirement = {
@@ -74,9 +78,16 @@ const BCRYPT_DEFAULTS = {
 
 const SESSION_DEFAULTS = {
   max: 10,
-  touchAfter: 60 * 60 * 24,
+  renewInterval: 60 * 60 * 24,
   ttl: 60 * 60 * 24 * 7,
+  validation: ["userAgent"],
 } as const;
+
+const SESSION_VALIDATION = new Set<SessionValidation>([
+  "ip",
+  "platform",
+  "userAgent",
+]);
 
 const requireInteger = ({ max, min, name, value }: IntegerRequirement) => {
   if (!Number.isInteger(value) || value < min || value > max) {
@@ -87,6 +98,39 @@ const requireInteger = ({ max, min, name, value }: IntegerRequirement) => {
   }
 
   return value;
+};
+
+const resolveSessionValidation = (input: unknown): SessionValidation[] => {
+  if (!Array.isArray(input)) {
+    throw createError({
+      code: "AUTH_CONFIG_INVALID",
+      message: "session.validation contains an invalid field.",
+    });
+  }
+
+  const fields: unknown[] = input;
+
+  if (
+    fields.some(
+      (field) =>
+        typeof field !== "string" ||
+        !SESSION_VALIDATION.has(field as SessionValidation),
+    )
+  ) {
+    throw createError({
+      code: "AUTH_CONFIG_INVALID",
+      message: "session.validation contains an invalid field.",
+    });
+  }
+
+  if (new Set(fields).size !== fields.length) {
+    throw createError({
+      code: "AUTH_CONFIG_INVALID",
+      message: "session.validation contains duplicate fields.",
+    });
+  }
+
+  return fields.map((field) => field as SessionValidation);
 };
 
 export const resolvePasswordConfig = (
@@ -198,11 +242,11 @@ export const resolveSessionConfig = (
     value: resolved.ttl,
   });
 
-  const touchAfter = requireInteger({
+  const renewInterval = requireInteger({
     max: ttl - 1,
     min: 1,
-    name: "session.touchAfter",
-    value: resolved.touchAfter,
+    name: "session.renewInterval",
+    value: resolved.renewInterval,
   });
 
   return {
@@ -212,7 +256,10 @@ export const resolveSessionConfig = (
       name: "session.max",
       value: resolved.max,
     }),
-    touchAfter,
+    renewInterval,
     ttl,
+    validation: resolveSessionValidation(
+      config.validation ?? SESSION_DEFAULTS.validation,
+    ),
   };
 };

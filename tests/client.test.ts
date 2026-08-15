@@ -4,7 +4,6 @@ import { describe, it } from "node:test";
 import {
   matchesClient,
   normalizeClient,
-  normalizeIdentity,
   normalizeIp,
 } from "../src/client/index.js";
 
@@ -20,43 +19,64 @@ describe("client normalization", () => {
   it("preserves the complete user agent", () => {
     const userAgent = `${"a".repeat(512)}  complete agent`;
     const client = normalizeClient({
-      country: " pt ",
       ip: "2001:0DB8:0:0:0:0:0:1",
       platform: '"macOS"',
       userAgent,
     });
 
     assert.deepEqual(client, {
-      country: "PT",
       ip: "2001:db8::1",
       platform: "macOS",
       userAgent,
     });
   });
 
-  it("matches only canonical IP and complete user agent", () => {
-    const stored = normalizeClient({ ip: "::ffff:192.0.2.10", userAgent: "Agent  Value" });
+  it("compares only the configured client fields", () => {
+    const stored = normalizeClient({
+      ip: "::ffff:192.0.2.10",
+      platform: '"macOS"',
+      userAgent: "Agent  Value",
+    });
 
     assert.equal(
       matchesClient({
-        current: normalizeIdentity({ ip: "192.0.2.10", userAgent: "Agent  Value" }),
+        current: normalizeClient({
+          ip: "192.0.2.11",
+          platform: '"macOS"',
+          userAgent: "Agent  Value",
+        }),
         stored,
+        validation: ["userAgent"],
       }),
       true,
     );
     assert.equal(
       matchesClient({
-        current: normalizeIdentity({ ip: "192.0.2.11", userAgent: "Agent  Value" }),
+        current: normalizeClient({
+          ip: "192.0.2.11",
+          platform: '"macOS"',
+          userAgent: "Agent  Value",
+        }),
         stored,
+        validation: ["ip", "userAgent"],
       }),
       false,
     );
     assert.equal(
       matchesClient({
-        current: normalizeIdentity({ ip: "192.0.2.10", userAgent: "Agent Value" }),
+        current: normalizeClient({
+          ip: "192.0.2.10",
+          platform: '"Windows"',
+          userAgent: "Agent Value",
+        }),
         stored,
+        validation: ["platform", "userAgent"],
       }),
       false,
+    );
+    assert.equal(
+      matchesClient({ current: normalizeClient({}), stored, validation: [] }),
+      true,
     );
   });
 });

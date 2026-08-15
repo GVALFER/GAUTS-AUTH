@@ -16,7 +16,6 @@ const isDateString = (value: unknown): value is string => {
 const isClient = (value: unknown): value is SessionClient => {
   return (
     isRecord(value) &&
-    isNullableString(value.country) &&
     isNullableString(value.ip) &&
     isNullableString(value.platform) &&
     isNullableString(value.userAgent)

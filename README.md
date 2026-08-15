@@ -4,8 +4,6 @@ Reusable password and opaque server-side session authentication for Node.js appl
 
 `@gauts/auth` validates sessions through Redis and records session history through an application-owned database adapter. It does not create endpoints, database models, users, or application authorization rules.
 
-The package is under active development and has not been published yet.
-
 ## Design
 
 - Argon2id by default, with explicit bcrypt support.
@@ -13,7 +11,7 @@ The package is under active development and has not been published yet.
 - SHA-256 token hashes in Redis and the session records database.
 - Redis-authoritative authentication with no database fallback.
 - Sliding inactivity expiration without an absolute lifetime.
-- Exact canonical IP and complete User-Agent session binding.
+- Configurable client validation, using the complete User-Agent by default.
 - Framework integrations through explicit package exports.
 
 ## Installation
@@ -22,16 +20,10 @@ The package is under active development and has not been published yet.
 npm install @gauts/auth redis hono
 ```
 
-The package is not on npm yet. During local development, use the tarball produced by `npm pack`.
-
 ## Setup
 
 ```ts
-import {
-  createAuth,
-  type SessionClientInput,
-  type SessionRecords,
-} from "@gauts/auth";
+import { createAuth, type SessionRecords } from "@gauts/auth";
 import { createHonoAdapter } from "@gauts/auth/hono";
 import { createRedisStore } from "@gauts/auth/redis";
 
@@ -57,47 +49,44 @@ const auth = createAuth<AccountSession>({
   records,
   session: {
     ttl: 60 * 60 * 24 * 7,
-    touchAfter: 60 * 60 * 24,
+    renewInterval: 60 * 60 * 24,
     max: 10,
+    validation: ["userAgent"],
   },
 });
 
-const getClient = async (c): Promise<SessionClientInput> => ({
-  ip: getTrustedClientIp(c),
-  userAgent: c.req.header("user-agent") ?? null,
-  country: await getCountryCode(c),
-  platform: c.req.header("sec-ch-ua-platform") ?? null,
+const hono = createHonoAdapter({
+  auth,
+  getIp: (c) => getTrustedClientIp(c),
 });
-
-const hono = createHonoAdapter({ auth, getClient });
 ```
 
 The application must obtain the client IP according to its own trusted-proxy configuration. The package canonicalizes the supplied IPv4 or IPv6 value but never decides which forwarding headers are trusted.
 
 ## Client information
 
-The Hono adapter calls `getClient` during session creation and on every authenticated request. The
-function receives the current Hono `Context` and returns these four values:
+The application supplies `getIp` because only its deployment knows which proxies and forwarding
+headers are trusted. The Hono adapter reads User-Agent and platform directly from the request.
+
+The resulting client information has this shape:
 
 ```ts
 type SessionClientInput = {
   ip?: string | null;
   userAgent?: string | null;
-  country?: string | null;
   platform?: string | null;
 };
 ```
 
-- `ip` and `userAgent` form the session identity and are compared on authenticated requests.
-- `country` and `platform` are stored as session metadata for history and display.
+- `validation` selects which client fields are compared on authenticated requests.
+- `userAgent` is compared by default.
+- `ip` and `platform` are always stored as session metadata, even when they are not compared.
 - IPv4, IPv4-mapped IPv6, and IPv6 values are canonicalized by the package.
-- Country is normalized to a two-letter uppercase code or `null`.
 - Platform is unquoted, trimmed, and limited to 255 characters.
 - User-Agent is stored and compared in full without truncation.
 
-The application extracts the raw values because trusted proxies, GeoIP sources, and request headers
-are deployment-specific. `getClient` should remain request-focused and should not perform unrelated
-account or database work.
+`getIp` runs during session creation and on every authenticated request. It should only resolve the
+trusted request IP and must not perform unrelated account or database work.
 
 ## Passwords
 
@@ -177,7 +166,7 @@ app.get("/account", hono.requireSession, async (c) => {
 });
 ```
 
-The middleware reads the cookie, resolves Redis, compares IP and User-Agent, renews expiry when due, and places the typed session in the Hono context. It does not load application data from the database.
+The middleware reads the cookie, resolves Redis, compares the configured client fields, renews expiry when due, and places the typed session in the Hono context. It does not load application data from the database.
 
 Applications that need to populate additional Hono context variables can resolve through the same adapter without duplicating its cookie behavior:
 
@@ -241,7 +230,7 @@ Each consuming application maps `SessionRecords` to its database. The durable re
 - Account ID and relation owned by the application.
 - SHA-256 token hash.
 - Canonical IP.
-- Country and platform metadata.
+- Platform metadata.
 - Complete User-Agent.
 - Creation, current expiry, update, and revocation timestamps.
 
@@ -254,8 +243,9 @@ Defaults:
 ```ts
 session: {
   ttl: 7 * 24 * 60 * 60,
-  touchAfter: 24 * 60 * 60,
+  renewInterval: 24 * 60 * 60,
   max: 10,
+  validation: ["userAgent"],
 }
 ```
 
@@ -265,11 +255,29 @@ session: {
 - There is no absolute session lifetime.
 - Every successful `resolve` call counts as activity and renews the session when due.
 
-## Client mismatch
+## Client validation
 
-If the canonical IP or complete User-Agent differs, the package deletes the Redis session first and marks its database record as revoked. Clearing the response cookie is client cleanup; Redis deletion is what removes access.
+The default compares only the complete User-Agent:
 
-Strict IP binding can log out legitimate users whose public IP changes. It is defense in depth and does not replace TLS, secure cookies, CSRF protection, XSS prevention, or re-authentication for sensitive actions.
+```ts
+session: {
+  validation: ["userAgent"],
+}
+```
+
+Applications can choose any combination of `ip`, `userAgent`, and `platform`:
+
+```ts
+session: {
+  validation: ["ip", "userAgent", "platform"],
+}
+```
+
+An empty array disables client-field comparison and validates only the session token. Unknown or duplicate fields are rejected during startup.
+
+If a configured field differs, the package deletes the Redis session first and marks its database record as revoked. Clearing the response cookie is client cleanup; Redis deletion is what removes access.
+
+Exact IP validation is opt-in because VPN, mobile, and other networks can change a legitimate user's public IP. Platform validation is also opt-in because the client-hint header may be absent. Client-field validation is defense in depth and does not replace TLS, secure cookies, CSRF protection, XSS prevention, or re-authentication for sensitive actions.
 
 ## Package exports
 

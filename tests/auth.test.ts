@@ -2,8 +2,12 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import { createAuth } from "../src/auth.js";
+import { resolveSessionConfig } from "../src/config.js";
 import { isAuthError } from "../src/errors.js";
-import type { RedisSessionStore, SessionRecords } from "../src/session/types.js";
+import type {
+  RedisSessionStore,
+  SessionRecords,
+} from "../src/session/types.js";
 
 const records: SessionRecords = {
   create: () => Promise.resolve(),
@@ -37,6 +41,24 @@ describe("auth configuration", () => {
     );
     assert.throws(
       () => createAuth({ records: null as never, redis }),
+      (error) => isAuthError(error) && error.code === "AUTH_CONFIG_INVALID",
+    );
+  });
+
+  it("validates session client fields during startup", () => {
+    assert.deepEqual(resolveSessionConfig().validation, ["userAgent"]);
+    assert.deepEqual(
+      resolveSessionConfig({ validation: ["ip", "platform", "userAgent"] })
+        .validation,
+      ["ip", "platform", "userAgent"],
+    );
+    assert.deepEqual(resolveSessionConfig({ validation: [] }).validation, []);
+    assert.throws(
+      () => resolveSessionConfig({ validation: ["unknown"] as never }),
+      (error) => isAuthError(error) && error.code === "AUTH_CONFIG_INVALID",
+    );
+    assert.throws(
+      () => resolveSessionConfig({ validation: ["ip", "ip"] }),
       (error) => isAuthError(error) && error.code === "AUTH_CONFIG_INVALID",
     );
   });

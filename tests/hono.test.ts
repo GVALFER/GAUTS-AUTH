@@ -21,7 +21,6 @@ const expiresAt = new Date("2026-08-22T12:00:00.000Z");
 const session: Session<Data> = {
   accountId: "account-1",
   client: {
-    country: "PT",
     ip: "192.0.2.10",
     platform: "macOS",
     userAgent: "Hono Test",
@@ -75,16 +74,16 @@ const createApp = (auth: Auth<Data>) => {
       name: "session",
       secure: false,
     },
-    getClient: (c) => ({
-      ip: c.req.header("x-forwarded-for") ?? null,
-      userAgent: c.req.header("user-agent") ?? null,
-    }),
+    getIp: (c) => c.req.header("x-forwarded-for"),
   });
   const app = new Hono<HonoAuthEnv<Data>>();
 
   app.onError((error, c) => {
     if (isAuthError(error)) {
-      return c.json({ code: error.code }, error.code === "SESSION_INVALID" ? 401 : 403);
+      return c.json(
+        { code: error.code },
+        error.code === "SESSION_INVALID" ? 401 : 403,
+      );
     }
 
     return c.json({ code: "INTERNAL" }, 500);
@@ -98,7 +97,9 @@ const createApp = (auth: Auth<Data>) => {
 
 describe("Hono adapter", () => {
   it("reads the cookie and exposes the resolved session", async () => {
-    const { app } = createApp(createMockAuth(async () => ({ renewed: false, session })));
+    const { app } = createApp(
+      createMockAuth(async () => ({ renewed: false, session })),
+    );
     const response = await app.request("/protected", {
       headers: {
         Cookie: `session=${token}`,
@@ -113,7 +114,9 @@ describe("Hono adapter", () => {
   });
 
   it("refreshes cookie expiry without changing the token", async () => {
-    const { app } = createApp(createMockAuth(async () => ({ renewed: true, session })));
+    const { app } = createApp(
+      createMockAuth(async () => ({ renewed: true, session })),
+    );
     const response = await app.request("/protected", {
       headers: { Cookie: `session=${token}` },
     });
@@ -133,7 +136,9 @@ describe("Hono adapter", () => {
       };
     };
 
-    const { adapter } = createApp(createMockAuth(async () => ({ renewed: false, session })));
+    const { adapter } = createApp(
+      createMockAuth(async () => ({ renewed: false, session })),
+    );
     const app = new Hono<AppEnv>();
 
     app.get(
@@ -167,7 +172,10 @@ describe("Hono adapter", () => {
 
     const mismatch = createApp(
       createMockAuth(async () => {
-        throw createError({ code: "SESSION_CLIENT_MISMATCH", message: "Mismatch." });
+        throw createError({
+          code: "SESSION_CLIENT_MISMATCH",
+          message: "Mismatch.",
+        });
       }),
     );
     const mismatchResponse = await mismatch.app.request("/protected", {
@@ -175,7 +183,10 @@ describe("Hono adapter", () => {
     });
 
     assert.equal(mismatchResponse.status, 403);
-    assert.match(mismatchResponse.headers.get("Set-Cookie") ?? "", /^session=;/);
+    assert.match(
+      mismatchResponse.headers.get("Set-Cookie") ?? "",
+      /^session=;/,
+    );
   });
 
   it("creates and revokes browser sessions without exposing token wiring", async () => {
@@ -185,6 +196,7 @@ describe("Hono adapter", () => {
         accountId: session.accountId,
         client: {
           ip: "192.0.2.10",
+          platform: '"macOS"',
           userAgent: "Hono Test",
         },
         data: session.data,
@@ -217,6 +229,7 @@ describe("Hono adapter", () => {
 
     const setResponse = await setApp.request("/set", {
       headers: {
+        "Sec-CH-UA-Platform": '"macOS"',
         "User-Agent": "Hono Test",
         "X-Forwarded-For": "192.0.2.10",
       },
@@ -226,7 +239,10 @@ describe("Hono adapter", () => {
     });
 
     assert.deepEqual(await setResponse.json(), { sessionId: session.id });
-    assert.match(setResponse.headers.get("Set-Cookie") ?? "", new RegExp(`^session=${token};`));
+    assert.match(
+      setResponse.headers.get("Set-Cookie") ?? "",
+      new RegExp(`^session=${token};`),
+    );
     assert.deepEqual(await revokeResponse.json(), { revoked: [session.id] });
     assert.match(revokeResponse.headers.get("Set-Cookie") ?? "", /^session=;/);
   });
@@ -258,11 +274,15 @@ describe("Hono adapter", () => {
     const auth = createMockAuth(async () => ({ renewed: false, session }));
 
     assert.throws(
+      () => createHonoAdapter({ auth, getIp: null as never }),
+      (error) => isAuthError(error) && error.code === "AUTH_CONFIG_INVALID",
+    );
+    assert.throws(
       () =>
         createHonoAdapter({
           auth,
           cookie: { name: "__Host-session", secure: false },
-          getClient: () => ({}),
+          getIp: () => null,
         }),
       (error) => isAuthError(error) && error.code === "AUTH_CONFIG_INVALID",
     );

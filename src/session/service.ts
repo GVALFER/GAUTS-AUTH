@@ -1,10 +1,6 @@
 import { randomUUID } from "node:crypto";
 
-import {
-  matchesClient,
-  normalizeClient,
-  normalizeIdentity,
-} from "../client/index.js";
+import { matchesClient, normalizeClient } from "../client/index.js";
 import type { ResolvedSessionConfig } from "../config.js";
 import { createError, isAuthError } from "../errors.js";
 import { encodeSession, parseSession, toSession } from "./schema.js";
@@ -221,9 +217,15 @@ export const createSessionService = <TData extends object>({
         return null;
       }
 
-      const identity = normalizeIdentity(input.client);
+      const client = normalizeClient(input.client);
 
-      if (!matchesClient({ current: identity, stored: stored.client })) {
+      if (
+        !matchesClient({
+          current: client,
+          stored: stored.client,
+          validation: config.validation,
+        })
+      ) {
         await runRedis(() => redis.delete([tokenHash]));
 
         try {
@@ -248,7 +250,7 @@ export const createSessionService = <TData extends object>({
 
       const due =
         current.getTime() - Date.parse(stored.touchedAt) >=
-        config.touchAfter * 1000;
+        config.renewInterval * 1000;
 
       if (!due) {
         return { renewed: false, session: toSession(stored) };

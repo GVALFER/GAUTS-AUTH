@@ -24,7 +24,9 @@ export type HonoCookieConfig = {
 export type HonoAdapterConfig<TData extends object> = {
   auth: Auth<TData>;
   cookie?: HonoCookieConfig;
-  getClient: (c: Context) => Promise<SessionClientInput> | SessionClientInput;
+  getIp: (
+    c: Context,
+  ) => Promise<string | null | undefined> | string | null | undefined;
 };
 
 type CreateSessionInput<TData extends object> = {
@@ -103,9 +105,22 @@ const resolveCookie = (config: HonoCookieConfig = {}) => {
 export const createHonoAdapter = <TData extends object>({
   auth,
   cookie,
-  getClient,
+  getIp,
 }: HonoAdapterConfig<TData>): HonoAdapter<TData> => {
+  if (typeof getIp !== "function") {
+    throw createError({
+      code: "AUTH_CONFIG_INVALID",
+      message: "Hono getIp must be a function.",
+    });
+  }
+
   const resolved = resolveCookie(cookie);
+
+  const getSessionClient = async (c: Context): Promise<SessionClientInput> => ({
+    ip: (await getIp(c)) ?? null,
+    platform: c.req.header("sec-ch-ua-platform") ?? null,
+    userAgent: c.req.header("user-agent") ?? null,
+  });
 
   const getToken = (c: Context): string | null => {
     const token = getCookie(c, resolved.name)?.trim();
@@ -139,7 +154,7 @@ export const createHonoAdapter = <TData extends object>({
   }: CreateSessionInput<TData>): Promise<Session<TData>> => {
     const created = await auth.session.create({
       accountId,
-      client: await getClient(context),
+      client: await getSessionClient(context),
       data,
     });
 
@@ -166,7 +181,7 @@ export const createHonoAdapter = <TData extends object>({
 
     try {
       resolvedSession = await auth.session.resolve({
-        client: await getClient(c),
+        client: await getSessionClient(c),
         token,
       });
     } catch (error) {

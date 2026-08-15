@@ -1,8 +1,4 @@
-import type {
-  SessionClient,
-  SessionClientInput,
-  SessionIdentityInput,
-} from "../client/index.js";
+import type { SessionClient, SessionClientInput } from "../client/index.js";
 
 export type SessionData = Record<string, unknown>;
 
@@ -43,7 +39,7 @@ export type CreateSession<TData extends object> = {
 };
 
 export type ResolveSession = {
-  client: SessionIdentityInput;
+  client: SessionClientInput;
   token: string;
 };
 

@@ -1,10 +1,5 @@
 import { Hono, type Context } from "hono";
-import {
-  createAuth,
-  isAuthError,
-  type SessionClientInput,
-  type SessionRecords,
-} from "@gauts/auth";
+import { createAuth, isAuthError, type SessionRecords } from "@gauts/auth";
 import { createHonoAdapter, type HonoAuthEnv } from "@gauts/auth/hono";
 import { createRedisStore } from "@gauts/auth/redis";
 import type { RedisClientType } from "redis";
@@ -21,14 +16,16 @@ type Account = AccountSession & {
 
 type ExampleDeps = {
   findAccount: (email: string) => Promise<Account | null>;
-  getClient: (c: Context) => Promise<SessionClientInput> | SessionClientInput;
+  getIp: (
+    c: Context,
+  ) => Promise<string | null | undefined> | string | null | undefined;
   records: SessionRecords;
   redis: RedisClientType;
 };
 
 export const createApp = ({
   findAccount,
-  getClient,
+  getIp,
   records,
   redis,
 }: ExampleDeps) => {
@@ -40,7 +37,7 @@ export const createApp = ({
     }),
   });
 
-  const hono = createHonoAdapter({ auth, getClient });
+  const hono = createHonoAdapter({ auth, getIp });
   const app = new Hono<HonoAuthEnv<AccountSession>>();
 
   app.onError((error, c) => {

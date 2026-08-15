@@ -13,20 +13,34 @@ describe("password service", () => {
     assert.equal(password.algorithm, "argon2id");
     assert.match(hash, /^\$argon2id\$/);
     assert.equal(
-      await password.verify({ password: "correct horse battery staple", storedHash: hash }),
+      await password.verify({
+        password: "correct horse battery staple",
+        storedHash: hash,
+      }),
       true,
     );
-    assert.equal(await password.verify({ password: "wrong password", storedHash: hash }), false);
+    assert.equal(
+      await password.verify({ password: "wrong password", storedHash: hash }),
+      false,
+    );
   });
 
   it("uses bcrypt only when configured", async () => {
-    const password = createPassword(resolvePasswordConfig({ algorithm: "bcrypt", rounds: 4 }));
+    const password = createPassword(
+      resolvePasswordConfig({ algorithm: "bcrypt", rounds: 4 }),
+    );
     const hash = await password.hash("bcrypt password");
 
     assert.equal(password.algorithm, "bcrypt");
     assert.match(hash, /^\$2[aby]\$/);
-    assert.equal(await password.verify({ password: "bcrypt password", storedHash: hash }), true);
-    assert.equal(await password.verify({ password: "wrong password", storedHash: hash }), false);
+    assert.equal(
+      await password.verify({ password: "bcrypt password", storedHash: hash }),
+      true,
+    );
+    assert.equal(
+      await password.verify({ password: "wrong password", storedHash: hash }),
+      false,
+    );
   });
 
   it("can verify legacy bcrypt input without allowing oversized new hashes", async () => {
@@ -54,12 +68,20 @@ describe("password service", () => {
 
   it("never falls back to another algorithm", async () => {
     const argon2id = createPassword(resolvePasswordConfig());
-    const bcrypt = createPassword(resolvePasswordConfig({ algorithm: "bcrypt", rounds: 4 }));
+    const bcrypt = createPassword(
+      resolvePasswordConfig({ algorithm: "bcrypt", rounds: 4 }),
+    );
     const argonHash = await argon2id.hash("password");
     const bcryptHash = await bcrypt.hash("password");
 
-    assert.equal(await argon2id.verify({ password: "password", storedHash: bcryptHash }), false);
-    assert.equal(await bcrypt.verify({ password: "password", storedHash: argonHash }), false);
+    assert.equal(
+      await argon2id.verify({ password: "password", storedHash: bcryptHash }),
+      false,
+    );
+    assert.equal(
+      await bcrypt.verify({ password: "password", storedHash: argonHash }),
+      false,
+    );
   });
 
   it("rejects empty and oversized password input", async () => {
@@ -71,8 +93,14 @@ describe("password service", () => {
   });
 
   it("rejects invalid password configuration", () => {
-    assert.throws(() => resolvePasswordConfig({ algorithm: "bcrypt", maxBytes: 73 }), isAuthError);
+    assert.throws(
+      () => resolvePasswordConfig({ algorithm: "bcrypt", maxBytes: 73 }),
+      isAuthError,
+    );
     assert.throws(() => resolvePasswordConfig({ memoryCost: 1 }), isAuthError);
-    assert.throws(() => resolvePasswordConfig({ algorithm: "scrypt" } as never), isAuthError);
+    assert.throws(
+      () => resolvePasswordConfig({ algorithm: "scrypt" } as never),
+      isAuthError,
+    );
   });
 });

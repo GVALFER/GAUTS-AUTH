@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { resolveSessionConfig } from "../src/config.js";
+import { resolveSessionConfig, type SessionValidation } from "../src/config.js";
 import { isAuthError } from "../src/errors.js";
 import { parseSession } from "../src/session/schema.js";
 import { createSessionService } from "../src/session/service.js";
@@ -19,7 +19,6 @@ type Data = {
 };
 
 const client = {
-  country: "pt",
   ip: "2001:0DB8:0:0:0:0:0:1",
   platform: '"macOS"',
   userAgent: "Complete  User Agent",
@@ -96,7 +95,8 @@ const createRecords = () => {
       calls.revoke += 1;
       for (const sessionId of sessionIds) {
         const row = rows.get(sessionId);
-        if (row) rows.set(sessionId, { ...row, revokedAt, updatedAt: revokedAt });
+        if (row)
+          rows.set(sessionId, { ...row, revokedAt, updatedAt: revokedAt });
       }
     },
     async updateExpiry({ expiresAt, sessionId, updatedAt }) {
@@ -109,12 +109,19 @@ const createRecords = () => {
   return { records, recordsCalls: calls, rows };
 };
 
-const createHarness = () => {
+const createHarness = (
+  validation: readonly SessionValidation[] = ["userAgent"],
+) => {
   let current = new Date("2026-08-15T12:00:00.000Z");
   const redis = createRedis();
   const sessionRecords = createRecords();
   const session = createSessionService<Data>({
-    config: resolveSessionConfig({ max: 2, touchAfter: 60, ttl: 300 }),
+    config: resolveSessionConfig({
+      max: 2,
+      renewInterval: 60,
+      ttl: 300,
+      validation,
+    }),
     now: () => new Date(current),
     records: sessionRecords.records,
     redis: redis.store,
@@ -172,7 +179,7 @@ describe("session service", () => {
     assert.equal(harness.recordsCalls.updateExpiry, 0);
   });
 
-  it("renews the same session token after touchAfter without an absolute expiry", async () => {
+  it("renews the same session token after renewInterval without an absolute expiry", async () => {
     const harness = createHarness();
     const created = await harness.session.create({
       client,
@@ -188,37 +195,35 @@ describe("session service", () => {
     });
 
     assert.equal(renewed?.renewed, true);
-    assert.ok((renewed?.session.expiresAt.getTime() ?? 0) > originalExpiry.getTime());
+    assert.ok(
+      (renewed?.session.expiresAt.getTime() ?? 0) > originalExpiry.getTime(),
+    );
     assert.equal(harness.recordsCalls.updateExpiry, 1);
     assert.equal(harness.redisCalls.update, 1);
 
     harness.advance(240);
-    const renewedAgain = await harness.session.resolve({ client, token: created.token });
+    const renewedAgain = await harness.session.resolve({
+      client,
+      token: created.token,
+    });
 
     assert.equal(renewedAgain?.renewed, true);
     assert.match(created.token, tokenPattern);
   });
 
-  it("revokes the backend session on IP or user-agent mismatch", async () => {
+  it("revokes the backend session on configured client mismatch", async () => {
     const harness = createHarness();
     const created = await harness.session.create({
       client,
       data: { email: "owner@example.com", role: "owner" },
       accountId: "account-1",
     });
-    const tokenHash = hashToken(created.token);
-
-    await assert.rejects(
-      harness.session.resolve({
-        client: { ip: "2001:db8::2", userAgent: client.userAgent },
+    assert.ok(
+      await harness.session.resolve({
+        client: { ...client, ip: "2001:db8::2" },
         token: created.token,
       }),
-      (error) => isAuthError(error) && error.code === "SESSION_CLIENT_MISMATCH",
     );
-
-    assert.equal(harness.values.has(tokenHash), false);
-    assert.ok(harness.rows.get(created.session.id)?.revokedAt);
-    assert.equal(await harness.session.resolve({ client, token: created.token }), null);
 
     const second = await harness.session.create({
       client,
@@ -235,6 +240,23 @@ describe("session service", () => {
     );
     assert.equal(harness.values.has(hashToken(second.token)), false);
     assert.ok(harness.rows.get(second.session.id)?.revokedAt);
+
+    const strict = createHarness(["ip", "userAgent"]);
+    const strictSession = await strict.session.create({
+      client,
+      data: { email: "owner@example.com", role: "owner" },
+      accountId: "account-1",
+    });
+
+    await assert.rejects(
+      strict.session.resolve({
+        client: { ...client, ip: "2001:db8::2" },
+        token: strictSession.token,
+      }),
+      (error) => isAuthError(error) && error.code === "SESSION_CLIENT_MISMATCH",
+    );
+    assert.equal(strict.values.has(hashToken(strictSession.token)), false);
+    assert.ok(strict.rows.get(strictSession.session.id)?.revokedAt);
   });
 
   it("deletes corrupt and expired Redis sessions", async () => {
@@ -243,7 +265,10 @@ describe("session service", () => {
     const corruptHash = hashToken(corruptToken);
     harness.values.set(corruptHash, "not-json");
 
-    assert.equal(await harness.session.resolve({ client, token: corruptToken }), null);
+    assert.equal(
+      await harness.session.resolve({ client, token: corruptToken }),
+      null,
+    );
     assert.equal(harness.values.has(corruptHash), false);
 
     const created = await harness.session.create({
@@ -253,7 +278,10 @@ describe("session service", () => {
     });
     harness.advance(301);
 
-    assert.equal(await harness.session.resolve({ client, token: created.token }), null);
+    assert.equal(
+      await harness.session.resolve({ client, token: created.token }),
+      null,
+    );
     assert.equal(harness.values.has(hashToken(created.token)), false);
   });
 
@@ -276,7 +304,10 @@ describe("session service", () => {
       accountId: "account-1",
     });
 
-    const resolved = await harness.session.resolve({ client, token: first.token });
+    const resolved = await harness.session.resolve({
+      client,
+      token: first.token,
+    });
     assert.equal(resolved?.session.data.email, "new@example.com");
 
     assert.deepEqual(
@@ -286,7 +317,9 @@ describe("session service", () => {
       }),
       [first.session.id],
     );
-    assert.deepEqual(await harness.session.revokeAccount("account-1"), [second.session.id]);
+    assert.deepEqual(await harness.session.revokeAccount("account-1"), [
+      second.session.id,
+    ]);
     assert.equal((await harness.session.list("account-1")).length, 0);
   });
 
@@ -309,7 +342,10 @@ describe("session service", () => {
   it("does not access Redis for malformed tokens", async () => {
     const harness = createHarness();
 
-    assert.equal(await harness.session.resolve({ client, token: "invalid" }), null);
+    assert.equal(
+      await harness.session.resolve({ client, token: "invalid" }),
+      null,
+    );
     assert.equal(harness.redisCalls.get, 0);
   });
 
