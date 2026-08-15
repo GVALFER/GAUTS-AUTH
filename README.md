@@ -27,15 +27,22 @@ The package is not on npm yet. During local development, use the tarball produce
 ## Setup
 
 ```ts
-import { createAuth, type SessionClientInput, type SessionRecords } from "@gauts/auth";
+import {
+  createAuth,
+  type SessionClientInput,
+  type SessionRecords,
+} from "@gauts/auth";
 import { createHonoAdapter } from "@gauts/auth/hono";
 import { createRedisStore } from "@gauts/auth/redis";
 
 const records: SessionRecords = {
   create: (session) => db.sessions.create(session),
-  find: ({ accountId, sessionId }) => db.sessions.find({ accountId, sessionId }),
-  findActive: ({ accountId, now }) => db.sessions.findActive({ accountId, now }),
-  revoke: ({ revokedAt, sessionIds }) => db.sessions.revoke({ revokedAt, sessionIds }),
+  find: ({ accountId, sessionId }) =>
+    db.sessions.find({ accountId, sessionId }),
+  findActive: ({ accountId, now }) =>
+    db.sessions.findActive({ accountId, now }),
+  revoke: ({ revokedAt, sessionIds }) =>
+    db.sessions.revoke({ revokedAt, sessionIds }),
   updateExpiry: ({ expiresAt, sessionId, updatedAt }) =>
     db.sessions.updateExpiry({ expiresAt, sessionId, updatedAt }),
 };
@@ -134,7 +141,13 @@ app.post("/auth/login", async (c) => {
   const { email, password } = await c.req.json();
   const account = await findAccount(email);
 
-  if (!account || !(await auth.password.verify({ password, storedHash: account.passwordHash }))) {
+  if (
+    !account ||
+    !(await auth.password.verify({
+      password,
+      storedHash: account.passwordHash,
+    }))
+  ) {
     return c.json({ error: "Invalid credentials." }, 401);
   }
 
@@ -265,5 +278,3 @@ Strict IP binding can log out legitimate users whose public IP changes. It is de
 @gauts/auth/redis  createRedisStore
 @gauts/auth/hono   createHonoAdapter
 ```
-
-See [`PLAN.md`](./PLAN.md) for the implementation phases and complete security decisions.
