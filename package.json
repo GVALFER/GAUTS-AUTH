@@ -1,0 +1,98 @@
+{
+  "name": "@gauts/auth",
+  "version": "0.1.3",
+  "description": "Framework-agnostic password and server-side session authentication for Node.js.",
+  "license": "MIT",
+  "author": "GVALFER",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/GVALFER/GAUTS-AUTH.git"
+  },
+  "homepage": "https://github.com/GVALFER/GAUTS-AUTH#readme",
+  "bugs": {
+    "url": "https://github.com/GVALFER/GAUTS-AUTH/issues"
+  },
+  "keywords": [
+    "authentication",
+    "argon2",
+    "bcrypt",
+    "hono",
+    "redis",
+    "session"
+  ],
+  "type": "module",
+  "packageManager": "npm@11.17.0",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "files": [
+    "dist",
+    "LICENSE",
+    "README.md",
+    "SECURITY.md"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./redis": {
+      "types": "./dist/adapters/redis/index.d.ts",
+      "import": "./dist/adapters/redis/index.js"
+    },
+    "./hono": {
+      "types": "./dist/adapters/hono/index.d.ts",
+      "import": "./dist/adapters/hono/index.js"
+    }
+  },
+  "scripts": {
+    "clean": "node --eval \"import { rmSync } from 'node:fs'; rmSync('dist', { force: true, recursive: true })\"",
+    "build": "npm run clean && tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "typecheck:example": "npm run build && tsc -p examples/hono/tsconfig.json",
+    "lint": "eslint src tests examples",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "node --import tsx --test tests/**/*.test.ts",
+    "test:redis": "node --import tsx --test tests/redis.integration.test.ts",
+    "check": "npm run format:check && npm run lint && npm run typecheck && npm test",
+    "prepack": "npm run check && npm run build"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "dependencies": {
+    "argon2": "^0.45.1",
+    "bcryptjs": "^3.0.2",
+    "ipaddr.js": "^2.5.0"
+  },
+  "peerDependencies": {
+    "hono": "^4.13.0",
+    "redis": "^6.2.0"
+  },
+  "peerDependenciesMeta": {
+    "hono": {
+      "optional": true
+    },
+    "redis": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.5",
+    "@types/node": "^24.10.0",
+    "eslint": "^9.39.5",
+    "globals": "^16.5.0",
+    "hono": "^4.13.0",
+    "prettier": "^3.8.1",
+    "redis": "^6.2.0",
+    "tsx": "^4.23.0",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.66.0"
+  },
+  "allowScripts": {
+    "argon2@0.45.1": true,
+    "esbuild@0.28.2": true,
+    "fsevents@2.3.3": true
+  }
+}
