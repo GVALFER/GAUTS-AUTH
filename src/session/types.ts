@@ -3,23 +3,23 @@ import type { SessionClient, SessionClientInput } from "../client/index.js";
 export type SessionData = Record<string, unknown>;
 
 export type StoredSession<TData extends object> = {
-  accountId: string;
+  account_id: string;
   client: SessionClient;
-  createdAt: string;
+  created_at: string;
   data: TData;
-  expiresAt: string;
+  expires_at: string;
   id: string;
-  touchedAt: string;
+  touched_at: string;
 };
 
 export type Session<TData extends object> = {
-  accountId: string;
+  account_id: string;
   client: SessionClient;
-  createdAt: Date;
+  created_at: Date;
   data: TData;
-  expiresAt: Date;
+  expires_at: Date;
   id: string;
-  touchedAt: Date;
+  touched_at: Date;
 };
 
 export type CreatedSession<TData extends object> = {
@@ -33,7 +33,7 @@ export type ResolvedSession<TData extends object> = {
 };
 
 export type CreateSession<TData extends object> = {
-  accountId: string;
+  account_id: string;
   client: SessionClientInput;
   data: TData;
 };
@@ -44,51 +44,56 @@ export type SessionInput = {
 };
 
 export type SessionRecord = {
-  accountId: string;
-  client: SessionClient;
-  createdAt: Date;
-  expiresAt: Date;
+  account_id: string;
+  agent: string | null;
+  created_at: Date;
+  expires_at: Date;
   id: string;
-  revokedAt: Date | null;
-  tokenHash: string;
-  updatedAt: Date | null;
+  ip: string | null;
+  platform: string | null;
+  revoked_at: Date | null;
+  token_hash: string;
+  updated_at: Date | null;
 };
 
 export type CreateSessionRecord = Omit<
   SessionRecord,
-  "revokedAt" | "updatedAt"
+  "revoked_at" | "updated_at"
 >;
 
-export type ActiveSession = Omit<SessionRecord, "tokenHash">;
+export type ActiveSession = Omit<SessionRecord, "token_hash">;
 
-export type SessionActions = {
+export type DbAdapter = {
   create(session: CreateSessionRecord): Promise<void>;
   find(input: {
-    accountId: string;
-    sessionId: string;
+    account_id: string;
+    session_id: string;
   }): Promise<SessionRecord | null>;
-  findActive(input: { accountId: string; now: Date }): Promise<SessionRecord[]>;
-  revoke(input: { revokedAt: Date; sessionIds: string[] }): Promise<void>;
+  findActive(input: {
+    account_id: string;
+    now: Date;
+  }): Promise<SessionRecord[]>;
+  revoke(input: { revoked_at: Date; session_ids: string[] }): Promise<void>;
   updateExpiry(input: {
-    expiresAt: Date;
-    sessionId: string;
-    updatedAt: Date;
+    expires_at: Date;
+    session_id: string;
+    updated_at: Date;
   }): Promise<void>;
 };
 
-export type RedisSessionStore = {
+export type RedisAdapter = {
   create(input: {
-    tokenHash: string;
+    token_hash: string;
     ttl: number;
     value: string;
   }): Promise<void>;
-  delete(tokenHashes: string[]): Promise<void>;
-  exists(tokenHashes: string[]): Promise<boolean[]>;
-  get(tokenHash: string): Promise<string | null>;
-  getMany(tokenHashes: string[]): Promise<(string | null)[]>;
-  keep(input: { tokenHash: string; value: string }): Promise<boolean>;
+  delete(token_hashes: string[]): Promise<void>;
+  exists(token_hashes: string[]): Promise<boolean[]>;
+  get(token_hash: string): Promise<string | null>;
+  getMany(token_hashes: string[]): Promise<(string | null)[]>;
+  keep(input: { token_hash: string; value: string }): Promise<boolean>;
   update(input: {
-    tokenHash: string;
+    token_hash: string;
     ttl: number;
     value: string;
   }): Promise<boolean>;
@@ -96,11 +101,11 @@ export type RedisSessionStore = {
 
 export type SessionService<TData extends object> = {
   create(input: CreateSession<TData>): Promise<CreatedSession<TData>>;
-  list(accountId: string): Promise<ActiveSession[]>;
+  list(account_id: string): Promise<ActiveSession[]>;
   resolve(input: SessionInput): Promise<ResolvedSession<TData> | null>;
   validate(input: SessionInput): Promise<Session<TData> | null>;
-  revoke(input: { accountId: string; sessionId: string }): Promise<string[]>;
-  revokeAccount(accountId: string): Promise<string[]>;
+  revoke(input: { account_id: string; session_id: string }): Promise<string[]>;
+  revokeAccount(account_id: string): Promise<string[]>;
   revokeToken(token: string): Promise<string[]>;
-  sync(input: { accountId: string; data: TData }): Promise<void>;
+  sync(input: { account_id: string; data: TData }): Promise<void>;
 };

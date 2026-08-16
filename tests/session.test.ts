@@ -8,8 +8,8 @@ import { createSessionService } from "../src/session/service.js";
 import { hashToken, tokenPattern } from "../src/session/token.js";
 import type {
   CreateSessionRecord,
-  RedisSessionStore,
-  SessionActions,
+  DbAdapter,
+  RedisAdapter,
   SessionRecord,
 } from "../src/session/types.js";
 
@@ -19,118 +19,118 @@ type Data = {
 };
 
 const client = {
+  agent: "Complete  User Agent",
   ip: "2001:0DB8:0:0:0:0:0:1",
   platform: '"macOS"',
-  userAgent: "Complete  User Agent",
 };
 
 const createRedis = () => {
   const values = new Map<string, string>();
   const ttls = new Map<string, number>();
   const calls = { create: 0, delete: 0, exists: 0, get: 0, update: 0 };
-  const store: RedisSessionStore = {
-    async create({ tokenHash, ttl, value }) {
+  const adapter: RedisAdapter = {
+    create: async ({ token_hash, ttl, value }) => {
       calls.create += 1;
-      if (values.has(tokenHash)) throw new Error("collision");
-      values.set(tokenHash, value);
-      ttls.set(tokenHash, ttl);
+      if (values.has(token_hash)) throw new Error("collision");
+      values.set(token_hash, value);
+      ttls.set(token_hash, ttl);
     },
-    async delete(tokenHashes) {
+    delete: async (token_hashes) => {
       calls.delete += 1;
-      for (const tokenHash of tokenHashes) {
-        values.delete(tokenHash);
-        ttls.delete(tokenHash);
+      for (const token_hash of token_hashes) {
+        values.delete(token_hash);
+        ttls.delete(token_hash);
       }
     },
-    async exists(tokenHashes) {
+    exists: async (token_hashes) => {
       calls.exists += 1;
-      return tokenHashes.map((tokenHash) => values.has(tokenHash));
+      return token_hashes.map((token_hash) => values.has(token_hash));
     },
-    async get(tokenHash) {
+    get: async (token_hash) => {
       calls.get += 1;
-      return values.get(tokenHash) ?? null;
+      return values.get(token_hash) ?? null;
     },
-    async getMany(tokenHashes) {
-      return tokenHashes.map((tokenHash) => values.get(tokenHash) ?? null);
-    },
-    async keep({ tokenHash, value }) {
-      if (!values.has(tokenHash)) return false;
-      values.set(tokenHash, value);
+    getMany: async (token_hashes) =>
+      token_hashes.map((token_hash) => values.get(token_hash) ?? null),
+    keep: async ({ token_hash, value }) => {
+      if (!values.has(token_hash)) return false;
+      values.set(token_hash, value);
       return true;
     },
-    async update({ tokenHash, ttl, value }) {
+    update: async ({ token_hash, ttl, value }) => {
       calls.update += 1;
-      if (!values.has(tokenHash)) return false;
-      values.set(tokenHash, value);
-      ttls.set(tokenHash, ttl);
+      if (!values.has(token_hash)) return false;
+      values.set(token_hash, value);
+      ttls.set(token_hash, ttl);
       return true;
     },
   };
 
-  return { redisCalls: calls, store, ttls, values };
+  return { adapter, calls, ttls, values };
 };
 
-const createActions = () => {
+const createDb = () => {
   const rows = new Map<string, SessionRecord>();
   const calls = { create: 0, findActive: 0, revoke: 0, updateExpiry: 0 };
-  const actions: SessionActions = {
-    async create(input: CreateSessionRecord) {
+  const adapter: DbAdapter = {
+    create: async (input: CreateSessionRecord) => {
       calls.create += 1;
-      rows.set(input.id, { ...input, revokedAt: null, updatedAt: null });
+      rows.set(input.id, { ...input, revoked_at: null, updated_at: null });
     },
-    async find({ accountId, sessionId }) {
-      const row = rows.get(sessionId);
-      return row?.accountId === accountId ? row : null;
+    find: async ({ account_id, session_id }) => {
+      const row = rows.get(session_id);
+      return row?.account_id === account_id ? row : null;
     },
-    async findActive({ accountId, now }) {
+    findActive: async ({ account_id, now }) => {
       calls.findActive += 1;
       return [...rows.values()].filter(
         (row) =>
-          row.accountId === accountId &&
-          row.revokedAt === null &&
-          row.expiresAt.getTime() > now.getTime(),
+          row.account_id === account_id &&
+          row.revoked_at === null &&
+          row.expires_at.getTime() > now.getTime(),
       );
     },
-    async revoke({ revokedAt, sessionIds }) {
+    revoke: async ({ revoked_at, session_ids }) => {
       calls.revoke += 1;
-      for (const sessionId of sessionIds) {
-        const row = rows.get(sessionId);
-        if (row)
-          rows.set(sessionId, { ...row, revokedAt, updatedAt: revokedAt });
+      for (const session_id of session_ids) {
+        const row = rows.get(session_id);
+        if (row) {
+          rows.set(session_id, { ...row, revoked_at, updated_at: revoked_at });
+        }
       }
     },
-    async updateExpiry({ expiresAt, sessionId, updatedAt }) {
+    updateExpiry: async ({ expires_at, session_id, updated_at }) => {
       calls.updateExpiry += 1;
-      const row = rows.get(sessionId);
-      if (row) rows.set(sessionId, { ...row, expiresAt, updatedAt });
+      const row = rows.get(session_id);
+      if (row) rows.set(session_id, { ...row, expires_at, updated_at });
     },
   };
 
-  return { actionCalls: calls, actions, rows };
+  return { adapter, calls, rows };
 };
 
 const createHarness = (
-  validation: readonly SessionValidation[] = ["userAgent"],
+  validation: readonly SessionValidation[] = ["agent"],
 ) => {
   let current = new Date("2026-08-15T12:00:00.000Z");
+  const db = createDb();
   const redis = createRedis();
-  const sessionActions = createActions();
   const session = createSessionService<Data>({
-    actions: sessionActions.actions,
     config: resolveSessionConfig({
       max: 2,
       renewInterval: 60,
       ttl: 300,
       validation,
     }),
+    db: db.adapter,
     now: () => new Date(current),
-    redis: redis.store,
+    redis: redis.adapter,
   });
 
   return {
-    ...redis,
-    ...sessionActions,
-    advance(seconds: number) {
+    db,
+    redis,
+    advance: (seconds: number) => {
       current = new Date(current.getTime() + seconds * 1000);
     },
     now: () => new Date(current),
@@ -142,51 +142,53 @@ describe("session service", () => {
   it("creates an opaque Redis session and a database record", async () => {
     const harness = createHarness();
     const created = await harness.session.create({
+      account_id: "account-1",
       client,
       data: { email: "owner@example.com", role: "owner" },
-      accountId: "account-1",
     });
-    const tokenHash = hashToken(created.token);
-    const stored = parseSession<Data>(harness.values.get(tokenHash) ?? "");
-    const row = harness.rows.get(created.session.id);
+    const token_hash = hashToken(created.token);
+    const stored = parseSession<Data>(
+      harness.redis.values.get(token_hash) ?? "",
+    );
+    const row = harness.db.rows.get(created.session.id);
 
     assert.match(created.token, tokenPattern);
-    assert.equal(tokenHash.length, 64);
-    assert.equal(harness.values.has(created.token), false);
-    assert.equal(row?.tokenHash, tokenHash);
-    assert.equal(row?.client.ip, "2001:db8::1");
-    assert.equal(row?.client.userAgent, client.userAgent);
+    assert.equal(token_hash.length, 64);
+    assert.equal(harness.redis.values.has(created.token), false);
+    assert.equal(row?.token_hash, token_hash);
+    assert.equal(row?.ip, "2001:db8::1");
+    assert.equal(row?.agent, client.agent);
     assert.equal(stored?.data.email, "owner@example.com");
-    assert.equal(harness.ttls.get(tokenHash), 300);
+    assert.equal(harness.redis.ttls.get(token_hash), 300);
   });
 
-  it("authenticates from Redis without a session action lookup", async () => {
+  it("authenticates from Redis without a database lookup", async () => {
     const harness = createHarness();
     const created = await harness.session.create({
+      account_id: "account-1",
       client,
       data: { email: "owner@example.com", role: "owner" },
-      accountId: "account-1",
     });
-    const findCalls = harness.actionCalls.findActive;
+    const findCalls = harness.db.calls.findActive;
     const resolved = await harness.session.resolve({
-      client: { ip: "2001:db8::1", userAgent: client.userAgent },
+      client: { agent: client.agent, ip: "2001:db8::1" },
       token: created.token,
     });
 
     assert.equal(resolved?.renewed, false);
-    assert.equal(resolved?.session.accountId, "account-1");
-    assert.equal(harness.actionCalls.findActive, findCalls);
-    assert.equal(harness.actionCalls.updateExpiry, 0);
+    assert.equal(resolved?.session.account_id, "account-1");
+    assert.equal(harness.db.calls.findActive, findCalls);
+    assert.equal(harness.db.calls.updateExpiry, 0);
   });
 
   it("renews the same session token after renewInterval without an absolute expiry", async () => {
     const harness = createHarness();
     const created = await harness.session.create({
+      account_id: "account-1",
       client,
       data: { email: "owner@example.com", role: "owner" },
-      accountId: "account-1",
     });
-    const originalExpiry = created.session.expiresAt;
+    const originalExpiry = created.session.expires_at;
 
     harness.advance(61);
     const renewed = await harness.session.resolve({
@@ -196,10 +198,10 @@ describe("session service", () => {
 
     assert.equal(renewed?.renewed, true);
     assert.ok(
-      (renewed?.session.expiresAt.getTime() ?? 0) > originalExpiry.getTime(),
+      (renewed?.session.expires_at.getTime() ?? 0) > originalExpiry.getTime(),
     );
-    assert.equal(harness.actionCalls.updateExpiry, 1);
-    assert.equal(harness.redisCalls.update, 1);
+    assert.equal(harness.db.calls.updateExpiry, 1);
+    assert.equal(harness.redis.calls.update, 1);
 
     harness.advance(240);
     const renewedAgain = await harness.session.resolve({
@@ -214,9 +216,9 @@ describe("session service", () => {
   it("validates without renewing an elapsed session", async () => {
     const harness = createHarness();
     const created = await harness.session.create({
+      account_id: "account-1",
       client,
       data: { email: "owner@example.com", role: "owner" },
-      accountId: "account-1",
     });
 
     harness.advance(61);
@@ -227,11 +229,11 @@ describe("session service", () => {
 
     assert.equal(validated?.id, created.session.id);
     assert.equal(
-      validated?.expiresAt.getTime(),
-      created.session.expiresAt.getTime(),
+      validated?.expires_at.getTime(),
+      created.session.expires_at.getTime(),
     );
-    assert.equal(harness.actionCalls.updateExpiry, 0);
-    assert.equal(harness.redisCalls.update, 0);
+    assert.equal(harness.db.calls.updateExpiry, 0);
+    assert.equal(harness.redis.calls.update, 0);
 
     const resolved = await harness.session.resolve({
       client,
@@ -244,9 +246,9 @@ describe("session service", () => {
   it("revokes the backend session on configured client mismatch", async () => {
     const harness = createHarness();
     const created = await harness.session.create({
+      account_id: "account-1",
       client,
       data: { email: "owner@example.com", role: "owner" },
-      accountId: "account-1",
     });
     assert.ok(
       await harness.session.resolve({
@@ -256,26 +258,26 @@ describe("session service", () => {
     );
 
     const second = await harness.session.create({
+      account_id: "account-1",
       client,
       data: { email: "owner@example.com", role: "owner" },
-      accountId: "account-1",
     });
 
     await assert.rejects(
       harness.session.resolve({
-        client: { ip: client.ip, userAgent: "Stolen Token Agent" },
+        client: { agent: "Stolen Token Agent", ip: client.ip },
         token: second.token,
       }),
       (error) => isAuthError(error) && error.code === "SESSION_CLIENT_MISMATCH",
     );
-    assert.equal(harness.values.has(hashToken(second.token)), false);
-    assert.ok(harness.rows.get(second.session.id)?.revokedAt);
+    assert.equal(harness.redis.values.has(hashToken(second.token)), false);
+    assert.ok(harness.db.rows.get(second.session.id)?.revoked_at);
 
-    const strict = createHarness(["ip", "userAgent"]);
+    const strict = createHarness(["ip", "agent"]);
     const strictSession = await strict.session.create({
+      account_id: "account-1",
       client,
       data: { email: "owner@example.com", role: "owner" },
-      accountId: "account-1",
     });
 
     await assert.rejects(
@@ -285,26 +287,29 @@ describe("session service", () => {
       }),
       (error) => isAuthError(error) && error.code === "SESSION_CLIENT_MISMATCH",
     );
-    assert.equal(strict.values.has(hashToken(strictSession.token)), false);
-    assert.ok(strict.rows.get(strictSession.session.id)?.revokedAt);
+    assert.equal(
+      strict.redis.values.has(hashToken(strictSession.token)),
+      false,
+    );
+    assert.ok(strict.db.rows.get(strictSession.session.id)?.revoked_at);
   });
 
   it("deletes corrupt and expired Redis sessions", async () => {
     const harness = createHarness();
     const corruptToken = "a".repeat(43);
     const corruptHash = hashToken(corruptToken);
-    harness.values.set(corruptHash, "not-json");
+    harness.redis.values.set(corruptHash, "not-json");
 
     assert.equal(
       await harness.session.resolve({ client, token: corruptToken }),
       null,
     );
-    assert.equal(harness.values.has(corruptHash), false);
+    assert.equal(harness.redis.values.has(corruptHash), false);
 
     const created = await harness.session.create({
+      account_id: "account-1",
       client,
       data: { email: "owner@example.com", role: "owner" },
-      accountId: "account-1",
     });
     harness.advance(301);
 
@@ -312,26 +317,26 @@ describe("session service", () => {
       await harness.session.resolve({ client, token: created.token }),
       null,
     );
-    assert.equal(harness.values.has(hashToken(created.token)), false);
+    assert.equal(harness.redis.values.has(hashToken(created.token)), false);
   });
 
   it("lists, synchronizes and revokes active sessions", async () => {
     const harness = createHarness();
     const first = await harness.session.create({
+      account_id: "account-1",
       client,
       data: { email: "old@example.com", role: "owner" },
-      accountId: "account-1",
     });
     const second = await harness.session.create({
+      account_id: "account-1",
       client,
       data: { email: "old@example.com", role: "owner" },
-      accountId: "account-1",
     });
 
     assert.equal((await harness.session.list("account-1")).length, 2);
     await harness.session.sync({
+      account_id: "account-1",
       data: { email: "new@example.com", role: "admin" },
-      accountId: "account-1",
     });
 
     const resolved = await harness.session.resolve({
@@ -342,8 +347,8 @@ describe("session service", () => {
 
     assert.deepEqual(
       await harness.session.revoke({
-        sessionId: first.session.id,
-        accountId: "account-1",
+        account_id: "account-1",
+        session_id: first.session.id,
       }),
       [first.session.id],
     );
@@ -356,9 +361,9 @@ describe("session service", () => {
   it("enforces the active-session limit", async () => {
     const harness = createHarness();
     const input = {
+      account_id: "account-1",
       client,
       data: { email: "owner@example.com", role: "owner" },
-      accountId: "account-1",
     };
 
     await harness.session.create(input);
@@ -376,18 +381,18 @@ describe("session service", () => {
       await harness.session.resolve({ client, token: "invalid" }),
       null,
     );
-    assert.equal(harness.redisCalls.get, 0);
+    assert.equal(harness.redis.calls.get, 0);
   });
 
   it("fails explicitly when Redis is unavailable", async () => {
     const harness = createHarness();
     const created = await harness.session.create({
+      account_id: "account-1",
       client,
       data: { email: "owner@example.com", role: "owner" },
-      accountId: "account-1",
     });
 
-    harness.store.get = () => Promise.reject(new Error("offline"));
+    harness.redis.adapter.get = () => Promise.reject(new Error("offline"));
 
     await assert.rejects(
       harness.session.resolve({ client, token: created.token }),
@@ -395,20 +400,34 @@ describe("session service", () => {
     );
   });
 
-  it("revokes the database record when Redis creation fails", async () => {
+  it("fails explicitly when the database is unavailable", async () => {
     const harness = createHarness();
-    harness.store.create = () => Promise.reject(new Error("offline"));
+    harness.db.adapter.findActive = () => Promise.reject(new Error("offline"));
 
     await assert.rejects(
       harness.session.create({
+        account_id: "account-1",
         client,
         data: { email: "owner@example.com", role: "owner" },
-        accountId: "account-1",
+      }),
+      (error) => isAuthError(error) && error.code === "DB_UNAVAILABLE",
+    );
+  });
+
+  it("revokes the database record when Redis creation fails", async () => {
+    const harness = createHarness();
+    harness.redis.adapter.create = () => Promise.reject(new Error("offline"));
+
+    await assert.rejects(
+      harness.session.create({
+        account_id: "account-1",
+        client,
+        data: { email: "owner@example.com", role: "owner" },
       }),
       (error) => isAuthError(error) && error.code === "REDIS_UNAVAILABLE",
     );
 
-    const [row] = [...harness.rows.values()];
-    assert.ok(row?.revokedAt);
+    const [row] = [...harness.db.rows.values()];
+    assert.ok(row?.revoked_at);
   });
 });

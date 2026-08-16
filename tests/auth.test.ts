@@ -5,12 +5,9 @@ import { createAuth } from "../src/auth.js";
 import { createHonoAuth } from "../src/adapters/hono/index.js";
 import { resolveSessionConfig } from "../src/config.js";
 import { isAuthError } from "../src/errors.js";
-import type {
-  RedisSessionStore,
-  SessionActions,
-} from "../src/session/types.js";
+import type { DbAdapter, RedisAdapter } from "../src/session/types.js";
 
-const actions: SessionActions = {
+const db: DbAdapter = {
   create: () => Promise.resolve(),
   find: () => Promise.resolve(null),
   findActive: () => Promise.resolve([]),
@@ -18,7 +15,7 @@ const actions: SessionActions = {
   updateExpiry: () => Promise.resolve(),
 };
 
-const redis: RedisSessionStore = {
+const redis: RedisAdapter = {
   create: () => Promise.resolve(),
   delete: () => Promise.resolve(),
   exists: () => Promise.resolve([]),
@@ -30,14 +27,14 @@ const redis: RedisSessionStore = {
 
 describe("auth configuration", () => {
   it("creates an auth instance from valid adapters", () => {
-    const auth = createAuth({ actions, redis });
+    const auth = createAuth({ db, redis });
 
     assert.equal(auth.password.algorithm, "argon2id");
   });
 
   it("creates one Hono auth instance with core and HTTP methods", () => {
     const auth = createHonoAuth({
-      actions,
+      db,
       getIp: () => null,
       redis,
     });
@@ -50,21 +47,21 @@ describe("auth configuration", () => {
 
   it("rejects incomplete adapters during startup", () => {
     assert.throws(
-      () => createAuth({ actions, redis: {} as RedisSessionStore }),
+      () => createAuth({ db, redis: {} as RedisAdapter }),
       (error) => isAuthError(error) && error.code === "AUTH_CONFIG_INVALID",
     );
     assert.throws(
-      () => createAuth({ actions: null as never, redis }),
+      () => createAuth({ db: null as never, redis }),
       (error) => isAuthError(error) && error.code === "AUTH_CONFIG_INVALID",
     );
   });
 
   it("validates session client fields during startup", () => {
-    assert.deepEqual(resolveSessionConfig().validation, ["userAgent"]);
+    assert.deepEqual(resolveSessionConfig().validation, ["agent"]);
     assert.deepEqual(
-      resolveSessionConfig({ validation: ["ip", "platform", "userAgent"] })
+      resolveSessionConfig({ validation: ["ip", "platform", "agent"] })
         .validation,
-      ["ip", "platform", "userAgent"],
+      ["ip", "platform", "agent"],
     );
     assert.deepEqual(resolveSessionConfig({ validation: [] }).validation, []);
     assert.throws(

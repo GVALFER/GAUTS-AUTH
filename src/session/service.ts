@@ -7,45 +7,47 @@ import { encodeSession, parseSession, toSession } from "./schema.js";
 import { createToken, hashToken, tokenPattern } from "./token.js";
 import type {
   ActiveSession,
-  RedisSessionStore,
+  DbAdapter,
+  RedisAdapter,
   SessionInput,
   SessionRecord,
-  SessionActions,
   SessionService,
   StoredSession,
 } from "./types.js";
 
 type SessionDeps = {
-  actions: SessionActions;
   config: ResolvedSessionConfig;
+  db: DbAdapter;
   now?: () => Date;
-  redis: RedisSessionStore;
+  redis: RedisAdapter;
 };
 
 type RevokeRowsProps = {
-  revokedAt: Date;
+  revoked_at: Date;
   rows: SessionRecord[];
 };
 
 type ValidatedSession<TData extends object> = {
   current: Date;
   stored: StoredSession<TData>;
-  tokenHash: string;
+  token_hash: string;
 };
 
 const toActiveSession = (session: SessionRecord): ActiveSession => ({
-  accountId: session.accountId,
-  client: session.client,
-  createdAt: session.createdAt,
-  expiresAt: session.expiresAt,
+  account_id: session.account_id,
+  agent: session.agent,
+  created_at: session.created_at,
+  expires_at: session.expires_at,
   id: session.id,
-  revokedAt: session.revokedAt,
-  updatedAt: session.updatedAt,
+  ip: session.ip,
+  platform: session.platform,
+  revoked_at: session.revoked_at,
+  updated_at: session.updated_at,
 });
 
 export const createSessionService = <TData extends object>({
-  actions,
   config,
+  db,
   now = () => new Date(),
   redis,
 }: SessionDeps): SessionService<TData> => {
@@ -65,7 +67,7 @@ export const createSessionService = <TData extends object>({
     }
   };
 
-  const runAction = async <T>(operation: () => Promise<T>): Promise<T> => {
+  const runDb = async <T>(operation: () => Promise<T>): Promise<T> => {
     try {
       return await operation();
     } catch (error) {
@@ -75,21 +77,19 @@ export const createSessionService = <TData extends object>({
 
       throw createError({
         cause: error,
-        code: "SESSION_ACTION_FAILED",
-        message: "Session action failed.",
+        code: "DB_UNAVAILABLE",
+        message: "Session database unavailable.",
       });
     }
   };
 
-  const getActive = async (accountId: string): Promise<SessionRecord[]> => {
+  const getActive = async (account_id: string): Promise<SessionRecord[]> => {
     const current = now();
-    const rows = await runAction(() =>
-      actions.findActive({ accountId, now: current }),
-    );
+    const rows = await runDb(() => db.findActive({ account_id, now: current }));
 
     const valid = rows.filter(
       (row) =>
-        row.revokedAt === null && row.expiresAt.getTime() > current.getTime(),
+        row.revoked_at === null && row.expires_at.getTime() > current.getTime(),
     );
 
     if (valid.length === 0) {
@@ -97,7 +97,7 @@ export const createSessionService = <TData extends object>({
     }
 
     const active = await runRedis(() =>
-      redis.exists(valid.map((row) => row.tokenHash)),
+      redis.exists(valid.map((row) => row.token_hash)),
     );
 
     if (active.length !== valid.length) {
@@ -111,18 +111,18 @@ export const createSessionService = <TData extends object>({
   };
 
   const revokeRows = async ({
-    revokedAt,
+    revoked_at,
     rows,
   }: RevokeRowsProps): Promise<string[]> => {
     if (rows.length === 0) {
       return [];
     }
 
-    await runRedis(() => redis.delete(rows.map((row) => row.tokenHash)));
-    const ids = rows.map((row) => row.id);
-    await runAction(() => actions.revoke({ revokedAt, sessionIds: ids }));
+    await runRedis(() => redis.delete(rows.map((row) => row.token_hash)));
+    const session_ids = rows.map((row) => row.id);
+    await runDb(() => db.revoke({ revoked_at, session_ids }));
 
-    return ids;
+    return session_ids;
   };
 
   const validateSession = async (
@@ -132,8 +132,8 @@ export const createSessionService = <TData extends object>({
       return null;
     }
 
-    const tokenHash = hashToken(input.token);
-    const raw = await runRedis(() => redis.get(tokenHash));
+    const token_hash = hashToken(input.token);
+    const raw = await runRedis(() => redis.get(token_hash));
 
     if (!raw) {
       return null;
@@ -142,19 +142,18 @@ export const createSessionService = <TData extends object>({
     const stored = parseSession<TData>(raw);
 
     if (!stored) {
-      await runRedis(() => redis.delete([tokenHash]));
+      await runRedis(() => redis.delete([token_hash]));
       return null;
     }
 
     const current = now();
 
-    if (Date.parse(stored.expiresAt) <= current.getTime()) {
-      await runRedis(() => redis.delete([tokenHash]));
+    if (Date.parse(stored.expires_at) <= current.getTime()) {
+      await runRedis(() => redis.delete([token_hash]));
       return null;
     }
 
     const client = normalizeClient(input.client);
-
     const matches = matchesClient({
       current: client,
       stored: stored.client,
@@ -162,11 +161,11 @@ export const createSessionService = <TData extends object>({
     });
 
     if (!matches) {
-      await runRedis(() => redis.delete([tokenHash]));
+      await runRedis(() => redis.delete([token_hash]));
 
       try {
-        await runAction(() =>
-          actions.revoke({ revokedAt: current, sessionIds: [stored.id] }),
+        await runDb(() =>
+          db.revoke({ revoked_at: current, session_ids: [stored.id] }),
         );
       } catch (error) {
         throw createError({
@@ -183,12 +182,12 @@ export const createSessionService = <TData extends object>({
       });
     }
 
-    return { current, stored, tokenHash };
+    return { current, stored, token_hash };
   };
 
   return {
     create: async (input) => {
-      if (!input.accountId) {
+      if (!input.account_id) {
         throw createError({
           code: "SESSION_DATA_INVALID",
           message: "Session account ID is required.",
@@ -196,24 +195,24 @@ export const createSessionService = <TData extends object>({
       }
 
       const client = normalizeClient(input.client);
-      const createdAt = now();
-      const expiresAt = new Date(createdAt.getTime() + config.ttl * 1000);
+      const created_at = now();
+      const expires_at = new Date(created_at.getTime() + config.ttl * 1000);
       const token = createToken();
-      const tokenHash = hashToken(token);
+      const token_hash = hashToken(token);
       const id = randomUUID();
 
       const stored: StoredSession<TData> = {
-        accountId: input.accountId,
+        account_id: input.account_id,
         client,
-        createdAt: createdAt.toISOString(),
+        created_at: created_at.toISOString(),
         data: input.data,
-        expiresAt: expiresAt.toISOString(),
+        expires_at: expires_at.toISOString(),
         id,
-        touchedAt: createdAt.toISOString(),
+        touched_at: created_at.toISOString(),
       };
 
       const value = encodeSession(stored);
-      const active = await getActive(input.accountId);
+      const active = await getActive(input.account_id);
 
       if (active.length >= config.max) {
         throw createError({
@@ -222,30 +221,32 @@ export const createSessionService = <TData extends object>({
         });
       }
 
-      await runAction(() =>
-        actions.create({
-          accountId: input.accountId,
-          client,
-          createdAt,
-          expiresAt,
+      await runDb(() =>
+        db.create({
+          account_id: input.account_id,
+          agent: client.agent,
+          created_at,
+          expires_at,
           id,
-          tokenHash,
+          ip: client.ip,
+          platform: client.platform,
+          token_hash,
         }),
       );
 
       try {
         await runRedis(() =>
-          redis.create({ tokenHash, ttl: config.ttl, value }),
+          redis.create({ token_hash, ttl: config.ttl, value }),
         );
       } catch (error) {
         try {
-          await runAction(() =>
-            actions.revoke({ revokedAt: now(), sessionIds: [id] }),
+          await runDb(() =>
+            db.revoke({ revoked_at: now(), session_ids: [id] }),
           );
-        } catch (actionError) {
+        } catch (dbError) {
           throw createError({
-            cause: new AggregateError([error, actionError]),
-            code: "SESSION_ACTION_FAILED",
+            cause: new AggregateError([error, dbError]),
+            code: "DB_UNAVAILABLE",
             message: "Session creation compensation failed.",
           });
         }
@@ -266,35 +267,33 @@ export const createSessionService = <TData extends object>({
         return null;
       }
 
-      const { current, stored, tokenHash } = validated;
-
+      const { current, stored, token_hash } = validated;
       const due =
-        current.getTime() - Date.parse(stored.touchedAt) >=
+        current.getTime() - Date.parse(stored.touched_at) >=
         config.renewInterval * 1000;
 
       if (!due) {
         return { renewed: false, session: toSession(stored) };
       }
 
-      const expiresAt = new Date(current.getTime() + config.ttl * 1000);
-
+      const expires_at = new Date(current.getTime() + config.ttl * 1000);
       const renewed: StoredSession<TData> = {
         ...stored,
-        expiresAt: expiresAt.toISOString(),
-        touchedAt: current.toISOString(),
+        expires_at: expires_at.toISOString(),
+        touched_at: current.toISOString(),
       };
 
-      await runAction(() =>
-        actions.updateExpiry({
-          expiresAt,
-          sessionId: stored.id,
-          updatedAt: current,
+      await runDb(() =>
+        db.updateExpiry({
+          expires_at,
+          session_id: stored.id,
+          updated_at: current,
         }),
       );
 
       const updated = await runRedis(() =>
         redis.update({
-          tokenHash,
+          token_hash,
           ttl: config.ttl,
           value: encodeSession(renewed),
         }),
@@ -313,59 +312,62 @@ export const createSessionService = <TData extends object>({
         return [];
       }
 
-      const tokenHash = hashToken(token);
-      const raw = await runRedis(() => redis.get(tokenHash));
+      const token_hash = hashToken(token);
+      const raw = await runRedis(() => redis.get(token_hash));
 
       if (!raw) {
         return [];
       }
 
       const stored = parseSession<TData>(raw);
-      await runRedis(() => redis.delete([tokenHash]));
+      await runRedis(() => redis.delete([token_hash]));
 
       if (!stored) {
         return [];
       }
 
-      await runAction(() =>
-        actions.revoke({ revokedAt: now(), sessionIds: [stored.id] }),
+      await runDb(() =>
+        db.revoke({ revoked_at: now(), session_ids: [stored.id] }),
       );
 
       return [stored.id];
     },
 
-    revoke: async ({ accountId, sessionId }) => {
-      const row = await runAction(() => actions.find({ accountId, sessionId }));
+    revoke: async ({ account_id, session_id }) => {
+      const row = await runDb(() => db.find({ account_id, session_id }));
 
-      if (row?.revokedAt !== null) {
+      if (row?.revoked_at !== null) {
         throw createError({
           code: "SESSION_NOT_FOUND",
           message: "Session not found.",
         });
       }
 
-      return revokeRows({ revokedAt: now(), rows: [row] });
+      return revokeRows({ revoked_at: now(), rows: [row] });
     },
 
-    revokeAccount: async (accountId) => {
-      return revokeRows({ revokedAt: now(), rows: await getActive(accountId) });
+    revokeAccount: async (account_id) => {
+      return revokeRows({
+        revoked_at: now(),
+        rows: await getActive(account_id),
+      });
     },
 
-    list: async (accountId) => {
-      return (await getActive(accountId)).map(toActiveSession);
+    list: async (account_id) => {
+      return (await getActive(account_id)).map(toActiveSession);
     },
 
-    sync: async ({ accountId, data }) => {
-      const rows = await getActive(accountId);
+    sync: async ({ account_id, data }) => {
+      const rows = await getActive(account_id);
 
       if (rows.length === 0) {
         return;
       }
 
-      const hashes = rows.map((row) => row.tokenHash);
-      const values = await runRedis(() => redis.getMany(hashes));
+      const token_hashes = rows.map((row) => row.token_hash);
+      const values = await runRedis(() => redis.getMany(token_hashes));
 
-      if (values.length !== hashes.length) {
+      if (values.length !== token_hashes.length) {
         throw createError({
           code: "REDIS_UNAVAILABLE",
           message: "Authentication service returned invalid data.",
@@ -377,18 +379,18 @@ export const createSessionService = <TData extends object>({
           if (!raw) return;
 
           const stored = parseSession<TData>(raw);
-          const tokenHash = hashes[index];
+          const token_hash = token_hashes[index];
 
-          if (!stored || !tokenHash || stored.accountId !== accountId) {
-            if (tokenHash) {
-              await runRedis(() => redis.delete([tokenHash]));
+          if (!stored || !token_hash || stored.account_id !== account_id) {
+            if (token_hash) {
+              await runRedis(() => redis.delete([token_hash]));
             }
             return;
           }
 
           await runRedis(() =>
             redis.keep({
-              tokenHash,
+              token_hash,
               value: encodeSession({ ...stored, data }),
             }),
           );

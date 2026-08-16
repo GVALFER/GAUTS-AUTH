@@ -1,14 +1,14 @@
 import type { RedisClientType } from "redis";
 import { createError } from "../../errors.js";
-import type { RedisSessionStore } from "../../session/types.js";
+import type { RedisAdapter } from "../../session/types.js";
 
-export type RedisStoreConfig = {
+export type RedisAdapterConfig = {
   prefix?: string;
 };
 
-export type RedisStoreInput = {
+export type RedisAdapterInput = {
   client: RedisClientType;
-  config?: RedisStoreConfig;
+  config?: RedisAdapterConfig;
 };
 
 const getPrefix = (input?: string): string => {
@@ -25,16 +25,16 @@ const getPrefix = (input?: string): string => {
   return prefix.replace(/:+$/g, "");
 };
 
-export const createRedisStore = ({
+export const createRedisAdapter = ({
   client,
   config = {},
-}: RedisStoreInput): RedisSessionStore => {
+}: RedisAdapterInput): RedisAdapter => {
   const prefix = getPrefix(config.prefix);
-  const getKey = (tokenHash: string) => `${prefix}:session:${tokenHash}`;
+  const getKey = (token_hash: string) => `${prefix}:session:${token_hash}`;
 
   return {
-    create: async ({ tokenHash, ttl, value }) => {
-      const result = await client.set(getKey(tokenHash), value, {
+    create: async ({ token_hash, ttl, value }) => {
+      const result = await client.set(getKey(token_hash), value, {
         EX: ttl,
         NX: true,
       });
@@ -44,18 +44,18 @@ export const createRedisStore = ({
       }
     },
 
-    get: async (tokenHash) => {
-      return client.get(getKey(tokenHash));
+    get: async (token_hash) => {
+      return client.get(getKey(token_hash));
     },
 
-    getMany: async (tokenHashes) => {
-      return tokenHashes.length === 0
+    getMany: async (token_hashes) => {
+      return token_hashes.length === 0
         ? []
-        : client.mGet(tokenHashes.map((tokenHash) => getKey(tokenHash)));
+        : client.mGet(token_hashes.map((token_hash) => getKey(token_hash)));
     },
 
-    update: async ({ tokenHash, ttl, value }) => {
-      const result = await client.set(getKey(tokenHash), value, {
+    update: async ({ token_hash, ttl, value }) => {
+      const result = await client.set(getKey(token_hash), value, {
         EX: ttl,
         XX: true,
       });
@@ -63,8 +63,8 @@ export const createRedisStore = ({
       return result === "OK";
     },
 
-    keep: async ({ tokenHash, value }) => {
-      const result = await client.set(getKey(tokenHash), value, {
+    keep: async ({ token_hash, value }) => {
+      const result = await client.set(getKey(token_hash), value, {
         KEEPTTL: true,
         XX: true,
       });
@@ -72,19 +72,19 @@ export const createRedisStore = ({
       return result === "OK";
     },
 
-    delete: async (tokenHashes) => {
-      if (tokenHashes.length > 0) {
-        await client.del(tokenHashes.map((tokenHash) => getKey(tokenHash)));
+    delete: async (token_hashes) => {
+      if (token_hashes.length > 0) {
+        await client.del(token_hashes.map((token_hash) => getKey(token_hash)));
       }
     },
 
-    exists: async (tokenHashes) => {
-      if (tokenHashes.length === 0) {
+    exists: async (token_hashes) => {
+      if (token_hashes.length === 0) {
         return [];
       }
 
       const values = await client.mGet(
-        tokenHashes.map((tokenHash) => getKey(tokenHash)),
+        token_hashes.map((token_hash) => getKey(token_hash)),
       );
 
       return values.map((value) => value !== null);

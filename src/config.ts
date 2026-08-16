@@ -18,7 +18,7 @@ export type BcryptConfig = {
 
 export type PasswordConfig = Argon2idConfig | BcryptConfig;
 
-export type SessionValidation = "ip" | "platform" | "userAgent";
+export type SessionValidation = "agent" | "ip" | "platform";
 
 export type SessionConfig = {
   max?: number;
@@ -80,13 +80,13 @@ const SESSION_DEFAULTS = {
   max: 10,
   renewInterval: 60 * 60 * 24,
   ttl: 60 * 60 * 24 * 7,
-  validation: ["userAgent"],
+  validation: ["agent"],
 } as const;
 
 const SESSION_VALIDATION = new Set<SessionValidation>([
+  "agent",
   "ip",
   "platform",
-  "userAgent",
 ]);
 
 const requireInteger = ({ max, min, name, value }: IntegerRequirement) => {

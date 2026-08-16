@@ -2,15 +2,15 @@ import ipaddr from "ipaddr.js";
 import type { SessionValidation } from "../config.js";
 
 export type SessionClientInput = {
+  agent?: string | null;
   ip?: string | null;
   platform?: string | null;
-  userAgent?: string | null;
 };
 
 export type SessionClient = {
+  agent: string | null;
   ip: string | null;
   platform: string | null;
-  userAgent: string | null;
 };
 
 type MatchesClientProps = {
@@ -45,13 +45,13 @@ const normalizePlatform = (input?: string | null): string | null => {
   return value ? value.slice(0, 255) : null;
 };
 
-const normalizeUserAgent = (input?: string | null): string | null =>
+const normalizeAgent = (input?: string | null): string | null =>
   input?.length ? input : null;
 
 export const normalizeClient = (input: SessionClientInput): SessionClient => ({
+  agent: normalizeAgent(input.agent),
   ip: normalizeIp(input.ip),
   platform: normalizePlatform(input.platform),
-  userAgent: normalizeUserAgent(input.userAgent),
 });
 
 export const matchesClient = ({

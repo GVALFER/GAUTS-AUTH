@@ -16,9 +16,9 @@ const isDateString = (value: unknown): value is string => {
 const isClient = (value: unknown): value is SessionClient => {
   return (
     isRecord(value) &&
+    isNullableString(value.agent) &&
     isNullableString(value.ip) &&
-    isNullableString(value.platform) &&
-    isNullableString(value.userAgent)
+    isNullableString(value.platform)
   );
 };
 
@@ -50,12 +50,12 @@ export const parseSession = <TData extends object>(
   if (
     !isRecord(value) ||
     typeof value.id !== "string" ||
-    typeof value.accountId !== "string" ||
+    typeof value.account_id !== "string" ||
     !isRecord(value.data) ||
     !isClient(value.client) ||
-    !isDateString(value.createdAt) ||
-    !isDateString(value.touchedAt) ||
-    !isDateString(value.expiresAt)
+    !isDateString(value.created_at) ||
+    !isDateString(value.touched_at) ||
+    !isDateString(value.expires_at)
   ) {
     return null;
   }
@@ -66,11 +66,11 @@ export const parseSession = <TData extends object>(
 export const toSession = <TData extends object>(
   stored: StoredSession<TData>,
 ): Session<TData> => ({
-  accountId: stored.accountId,
+  account_id: stored.account_id,
   client: stored.client,
-  createdAt: new Date(stored.createdAt),
+  created_at: new Date(stored.created_at),
   data: stored.data,
-  expiresAt: new Date(stored.expiresAt),
+  expires_at: new Date(stored.expires_at),
   id: stored.id,
-  touchedAt: new Date(stored.touchedAt),
+  touched_at: new Date(stored.touched_at),
 });

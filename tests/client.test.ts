@@ -17,17 +17,17 @@ describe("client normalization", () => {
   });
 
   it("preserves the complete user agent", () => {
-    const userAgent = `${"a".repeat(512)}  complete agent`;
+    const agent = `${"a".repeat(512)}  complete agent`;
     const client = normalizeClient({
       ip: "2001:0DB8:0:0:0:0:0:1",
       platform: '"macOS"',
-      userAgent,
+      agent,
     });
 
     assert.deepEqual(client, {
       ip: "2001:db8::1",
       platform: "macOS",
-      userAgent,
+      agent,
     });
   });
 
@@ -35,7 +35,7 @@ describe("client normalization", () => {
     const stored = normalizeClient({
       ip: "::ffff:192.0.2.10",
       platform: '"macOS"',
-      userAgent: "Agent  Value",
+      agent: "Agent  Value",
     });
 
     assert.equal(
@@ -43,10 +43,10 @@ describe("client normalization", () => {
         current: normalizeClient({
           ip: "192.0.2.11",
           platform: '"macOS"',
-          userAgent: "Agent  Value",
+          agent: "Agent  Value",
         }),
         stored,
-        validation: ["userAgent"],
+        validation: ["agent"],
       }),
       true,
     );
@@ -55,10 +55,10 @@ describe("client normalization", () => {
         current: normalizeClient({
           ip: "192.0.2.11",
           platform: '"macOS"',
-          userAgent: "Agent  Value",
+          agent: "Agent  Value",
         }),
         stored,
-        validation: ["ip", "userAgent"],
+        validation: ["ip", "agent"],
       }),
       false,
     );
@@ -67,10 +67,10 @@ describe("client normalization", () => {
         current: normalizeClient({
           ip: "192.0.2.10",
           platform: '"Windows"',
-          userAgent: "Agent Value",
+          agent: "Agent Value",
         }),
         stored,
-        validation: ["platform", "userAgent"],
+        validation: ["platform", "agent"],
       }),
       false,
     );

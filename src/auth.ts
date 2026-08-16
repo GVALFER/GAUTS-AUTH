@@ -4,8 +4,8 @@ import { createError } from "./errors.js";
 import { createPassword, type PasswordService } from "./password/index.js";
 import { createSessionService } from "./session/service.js";
 import type {
-  RedisSessionStore,
-  SessionActions,
+  DbAdapter,
+  RedisAdapter,
   SessionService,
 } from "./session/types.js";
 
@@ -15,8 +15,8 @@ export type AuthConfig = {
 };
 
 export type AuthDeps = AuthConfig & {
-  actions: SessionActions;
-  redis: RedisSessionStore;
+  db: DbAdapter;
+  redis: RedisAdapter;
 };
 
 export type Auth<TData extends object> = {
@@ -53,7 +53,7 @@ const requireMethods = ({
 };
 
 export const createAuth = <TData extends object = Record<string, unknown>>({
-  actions,
+  db,
   password,
   redis,
   session,
@@ -65,15 +65,15 @@ export const createAuth = <TData extends object = Record<string, unknown>>({
   });
   requireMethods({
     methods: ["create", "find", "findActive", "revoke", "updateExpiry"],
-    name: "Session actions",
-    value: actions,
+    name: "DB",
+    value: db,
   });
 
   return {
     password: createPassword(resolvePasswordConfig(password)),
     session: createSessionService({
-      actions,
       config: resolveSessionConfig(session),
+      db,
       redis,
     }),
   };

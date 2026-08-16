@@ -17,19 +17,19 @@ type Data = {
 };
 
 const token = "a".repeat(43);
-const expiresAt = new Date("2026-08-22T12:00:00.000Z");
+const expires_at = new Date("2026-08-22T12:00:00.000Z");
 const session: Session<Data> = {
-  accountId: "account-1",
+  account_id: "account-1",
   client: {
+    agent: "Hono Test",
     ip: "192.0.2.10",
     platform: "macOS",
-    userAgent: "Hono Test",
   },
-  createdAt: new Date("2026-08-15T12:00:00.000Z"),
+  created_at: new Date("2026-08-15T12:00:00.000Z"),
   data: { email: "owner@example.com" },
-  expiresAt,
+  expires_at,
   id: "session-1",
-  touchedAt: new Date("2026-08-15T12:00:00.000Z"),
+  touched_at: new Date("2026-08-15T12:00:00.000Z"),
 };
 
 const createMockAuth = (
@@ -94,7 +94,7 @@ const createApp = (auth: Auth<Data>) => {
   app.get("/protected", adapter.requireSession, (c) =>
     c.json({
       account: c.get("account"),
-      accountId: c.get("session").accountId,
+      accountId: c.get("session").account_id,
     }),
   );
 
@@ -202,11 +202,11 @@ describe("Hono adapter", () => {
     const auth = createMockAuth(async () => ({ renewed: false, session }));
     auth.session.create = async (input) => {
       assert.deepEqual(input, {
-        accountId: session.accountId,
+        account_id: session.account_id,
         client: {
+          agent: "Hono Test",
           ip: "192.0.2.10",
           platform: '"macOS"',
-          userAgent: "Hono Test",
         },
         data: session.data,
       });
@@ -223,7 +223,7 @@ describe("Hono adapter", () => {
 
     setApp.get("/set", async (c) => {
       const created = await adapter.createSession({
-        accountId: session.accountId,
+        account_id: session.account_id,
         context: c,
         data: session.data,
       });

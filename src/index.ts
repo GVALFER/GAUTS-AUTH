@@ -14,12 +14,12 @@ export type {
   ActiveSession,
   CreateSessionRecord,
   CreatedSession,
-  RedisSessionStore,
+  DbAdapter,
+  RedisAdapter,
   ResolvedSession,
   Session,
   SessionInput,
   SessionRecord,
-  SessionActions,
   SessionService,
 } from "./session/types.js";
 export type { SessionClient, SessionClientInput } from "./client/index.js";
