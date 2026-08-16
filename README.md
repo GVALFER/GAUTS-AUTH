@@ -79,8 +79,8 @@ The generic passed to `createHonoAuth` defines the application data cached in Re
 
 ```ts
 type AccountSession = {
-  email: string;
-  role: "admin" | "owner";
+    email: string;
+    role: "admin" | "owner";
 };
 ```
 
@@ -92,14 +92,14 @@ import { createDbAdapter } from "@gauts/auth/prisma";
 import { createRedisAdapter } from "@gauts/auth/redis";
 
 export const auth = createHonoAuth<AccountSession>({
-  getIp: (c) => getTrustedClientIp(c),
-  db: createDbAdapter({
-    client: prisma,
-  }),
-  redis: createRedisAdapter({
-    client: redis,
-    config: { prefix: "my-app:auth" },
-  }),
+    getIp: (c) => getTrustedClientIp(c),
+    db: createDbAdapter({
+        client: prisma,
+    }),
+    redis: createRedisAdapter({
+        client: redis,
+        config: { prefix: "my-app:auth" },
+    }),
 });
 ```
 
@@ -109,10 +109,10 @@ Both clients must already be initialized by the application. The package does no
 
 ```ts
 const db = createDbAdapter({
-  client: prisma,
-  config: {
-    table: "admin_sessions",
-  },
+    client: prisma,
+    config: {
+        table: "admin_sessions",
+    },
 });
 ```
 
@@ -140,32 +140,32 @@ The application owns request validation, account lookup, rate limiting, status c
 
 ```ts
 app.post("/auth/login", async (c) => {
-  const { email, password } = await c.req.json<{
-    email: string;
-    password: string;
-  }>();
-  const account = await findAccount(email);
+    const { email, password } = await c.req.json<{
+        email: string;
+        password: string;
+    }>();
+    const account = await findAccount(email);
 
-  if (
-    !account ||
-    !(await auth.password.verify({
-      password,
-      storedHash: account.password_hash,
-    }))
-  ) {
-    return c.json({ error: "Invalid credentials." }, 401);
-  }
+    if (
+        !account ||
+        !(await auth.password.verify({
+            password,
+            storedHash: account.password_hash,
+        }))
+    ) {
+        return c.json({ error: "Invalid credentials." }, 401);
+    }
 
-  const session = await auth.createSession({
-    account_id: account.id,
-    context: c,
-    data: {
-      email: account.email,
-      role: account.role,
-    },
-  });
+    const session = await auth.createSession({
+        account_id: account.id,
+        context: c,
+        data: {
+            email: account.email,
+            role: account.role,
+        },
+    });
 
-  return c.json({ account: session.data });
+    return c.json({ account: session.data });
 });
 ```
 
@@ -175,10 +175,10 @@ app.post("/auth/login", async (c) => {
 
 ```ts
 app.get("/account", auth.requireSession, (c) => {
-  return c.json({
-    account: c.get("account"),
-    session_id: c.get("session").id,
-  });
+    return c.json({
+        account: c.get("account"),
+        session_id: c.get("session").id,
+    });
 });
 ```
 
@@ -188,8 +188,8 @@ app.get("/account", auth.requireSession, (c) => {
 
 ```ts
 app.post("/auth/logout", async (c) => {
-  await auth.revokeSession(c);
-  return c.body(null, 204);
+    await auth.revokeSession(c);
+    return c.body(null, 204);
 });
 ```
 
@@ -201,12 +201,12 @@ Logout deletes the Redis session, records revocation in the database, and clears
 
 ```ts
 const auth = createHonoAuth<AccountSession>({
-  getIp,
-  db,
-  redis,
-  password,
-  session,
-  cookie,
+    getIp,
+    db,
+    redis,
+    password,
+    session,
+    cookie,
 });
 ```
 
@@ -318,10 +318,10 @@ const redis = createClient({ url: process.env.REDIS_URL });
 await redis.connect();
 
 const adapter = createRedisAdapter({
-  client: redis,
-  config: {
-    prefix: "my-app:auth",
-  },
+    client: redis,
+    config: {
+        prefix: "my-app:auth",
+    },
 });
 ```
 
@@ -341,7 +341,7 @@ Default model:
 import { createDbAdapter } from "@gauts/auth/prisma";
 
 const db = createDbAdapter({
-  client: prisma,
+    client: prisma,
 });
 ```
 
@@ -349,10 +349,10 @@ Custom compatible model:
 
 ```ts
 const db = createDbAdapter({
-  client: prisma,
-  config: {
-    table: "admin_sessions",
-  },
+    client: prisma,
+    config: {
+        table: "admin_sessions",
+    },
 });
 ```
 
@@ -370,11 +370,11 @@ Applications not using Prisma can implement the exported `DbAdapter` contract:
 import type { DbAdapter } from "@gauts/auth";
 
 const db = {
-  create: async (session) => {},
-  find: async ({ account_id, session_id }) => null,
-  findActive: async ({ account_id, now }) => [],
-  revoke: async ({ revoked_at, session_ids }) => {},
-  updateExpiry: async ({ expires_at, session_id, updated_at }) => {},
+    create: async (session) => {},
+    find: async ({ account_id, session_id }) => null,
+    findActive: async ({ account_id, now }) => [],
+    revoke: async ({ revoked_at, session_ids }) => {},
+    updateExpiry: async ({ expires_at, session_id, updated_at }) => {},
 } satisfies DbAdapter;
 ```
 
@@ -394,9 +394,9 @@ The Hono adapter reads the remaining metadata from request headers:
 
 ```ts
 type SessionClientInput = {
-  agent?: string | null;
-  ip?: string | null;
-  platform?: string | null;
+    agent?: string | null;
+    ip?: string | null;
+    platform?: string | null;
 };
 ```
 
@@ -427,8 +427,8 @@ Verifies only with the configured algorithm. A hash from another algorithm or an
 
 ```ts
 const valid = await auth.password.verify({
-  password,
-  storedHash: account.password_hash,
+    password,
+    storedHash: account.password_hash,
 });
 ```
 
@@ -481,8 +481,8 @@ Creates a session and returns:
 
 ```ts
 {
-  session: Session<TData>;
-  token: string;
+    session: Session<TData>;
+    token: string;
 }
 ```
 
@@ -494,8 +494,8 @@ Validates and renews when due. It returns `null` for an invalid or expired sessi
 
 ```ts
 {
-  renewed: boolean;
-  session: Session<TData>;
+    renewed: boolean;
+    session: Session<TData>;
 }
 ```
 
@@ -531,31 +531,31 @@ Use it after changing cached account data. Use `revokeAccount` when a change mus
 
 ```ts
 type Session<TData> = {
-  account_id: string;
-  client: {
-    agent: string | null;
-    ip: string | null;
-    platform: string | null;
-  };
-  created_at: Date;
-  data: TData;
-  expires_at: Date;
-  id: string;
-  touched_at: Date;
+    account_id: string;
+    client: {
+        agent: string | null;
+        ip: string | null;
+        platform: string | null;
+    };
+    created_at: Date;
+    data: TData;
+    expires_at: Date;
+    id: string;
+    touched_at: Date;
 };
 ```
 
 ```ts
 type ActiveSession = {
-  account_id: string;
-  agent: string | null;
-  created_at: Date;
-  expires_at: Date;
-  id: string;
-  ip: string | null;
-  platform: string | null;
-  revoked_at: Date | null;
-  updated_at: Date | null;
+    account_id: string;
+    agent: string | null;
+    created_at: Date;
+    expires_at: Date;
+    id: string;
+    ip: string | null;
+    platform: string | null;
+    revoked_at: Date | null;
+    updated_at: Date | null;
 };
 ```
 
@@ -608,15 +608,15 @@ All package errors have `name: "AuthError"` and a typed `code`.
 import { isAuthError } from "@gauts/auth";
 
 app.onError((error, c) => {
-  if (!isAuthError(error)) {
-    return c.json({ error: "Internal server error." }, 500);
-  }
+    if (!isAuthError(error)) {
+        return c.json({ error: "Internal server error." }, 500);
+    }
 
-  if (error.code === "REDIS_UNAVAILABLE" || error.code === "DB_UNAVAILABLE") {
-    return c.json({ error: "Authentication service unavailable." }, 503);
-  }
+    if (error.code === "REDIS_UNAVAILABLE" || error.code === "DB_UNAVAILABLE") {
+        return c.json({ error: "Authentication service unavailable." }, 503);
+    }
 
-  return c.json({ error: error.message }, 401);
+    return c.json({ error: error.message }, 401);
 });
 ```
 
@@ -642,8 +642,8 @@ import { createDbAdapter } from "@gauts/auth/prisma";
 import { createRedisAdapter } from "@gauts/auth/redis";
 
 const auth = createAuth<AccountSession>({
-  db: createDbAdapter({ client: prisma }),
-  redis: createRedisAdapter({ client: redis }),
+    db: createDbAdapter({ client: prisma }),
+    redis: createRedisAdapter({ client: redis }),
 });
 ```
 

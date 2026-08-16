@@ -3,78 +3,70 @@ import { resolvePasswordConfig, resolveSessionConfig } from "./config.js";
 import { createError } from "./errors.js";
 import { createPassword, type PasswordService } from "./password/index.js";
 import { createSessionService } from "./session/service.js";
-import type {
-  DbAdapter,
-  RedisAdapter,
-  SessionService,
-} from "./session/types.js";
+import type { DbAdapter, RedisAdapter, SessionService } from "./session/types.js";
 
 export type AuthConfig = {
-  password?: PasswordConfig;
-  session?: SessionConfig;
+    password?: PasswordConfig;
+    session?: SessionConfig;
 };
 
 export type AuthDeps = AuthConfig & {
-  db: DbAdapter;
-  redis: RedisAdapter;
+    db: DbAdapter;
+    redis: RedisAdapter;
 };
 
 export type Auth<TData extends object> = {
-  password: PasswordService;
-  session: SessionService<TData>;
+    password: PasswordService;
+    session: SessionService<TData>;
 };
 
 type RequireMethodsInput = {
-  methods: string[];
-  name: string;
-  value: unknown;
+    methods: string[];
+    name: string;
+    value: unknown;
 };
 
-const requireMethods = ({
-  methods,
-  name,
-  value,
-}: RequireMethodsInput): void => {
-  if (typeof value !== "object" || value === null) {
-    throw createError({
-      code: "AUTH_CONFIG_INVALID",
-      message: `${name} adapter is invalid.`,
-    });
-  }
+const requireMethods = ({ methods, name, value }: RequireMethodsInput): void => {
+    if (typeof value !== "object" || value === null) {
+        throw createError({
+            code: "AUTH_CONFIG_INVALID",
+            message: `${name} adapter is invalid.`,
+        });
+    }
 
-  const adapter = value as Record<string, unknown>;
+    const adapter = value as Record<string, unknown>;
 
-  if (methods.some((method) => typeof adapter[method] !== "function")) {
-    throw createError({
-      code: "AUTH_CONFIG_INVALID",
-      message: `${name} adapter is invalid.`,
-    });
-  }
+    if (methods.some((method) => typeof adapter[method] !== "function")) {
+        throw createError({
+            code: "AUTH_CONFIG_INVALID",
+            message: `${name} adapter is invalid.`,
+        });
+    }
 };
 
 export const createAuth = <TData extends object = Record<string, unknown>>({
-  db,
-  password,
-  redis,
-  session,
+    db,
+    password,
+    redis,
+    session,
 }: AuthDeps): Auth<TData> => {
-  requireMethods({
-    methods: ["create", "delete", "exists", "get", "getMany", "keep", "update"],
-    name: "Redis",
-    value: redis,
-  });
-  requireMethods({
-    methods: ["create", "find", "findActive", "revoke", "updateExpiry"],
-    name: "DB",
-    value: db,
-  });
+    requireMethods({
+        methods: ["create", "delete", "exists", "get", "getMany", "keep", "update"],
+        name: "Redis",
+        value: redis,
+    });
+    requireMethods({
+        methods: ["create", "find", "findActive", "revoke", "updateExpiry"],
+        name: "DB",
+        value: db,
+    });
 
-  return {
-    password: createPassword(resolvePasswordConfig(password)),
-    session: createSessionService({
-      config: resolveSessionConfig(session),
-      db,
-      redis,
-    }),
-  };
+    return {
+        password: createPassword(resolvePasswordConfig(password)),
+        session: createSessionService({
+            config: resolveSessionConfig(session),
+            db,
+            redis,
+        }),
+    };
 };
