@@ -7,7 +7,7 @@ export type AuthErrorCode =
   | "SESSION_LIMIT_REACHED"
   | "SESSION_NOT_FOUND"
   | "REDIS_UNAVAILABLE"
-  | "RECORDS_UNAVAILABLE";
+  | "SESSION_ACTION_FAILED";
 
 export type AuthError = Error & {
   code: AuthErrorCode;

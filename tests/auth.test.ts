@@ -7,10 +7,10 @@ import { resolveSessionConfig } from "../src/config.js";
 import { isAuthError } from "../src/errors.js";
 import type {
   RedisSessionStore,
-  SessionRecords,
+  SessionActions,
 } from "../src/session/types.js";
 
-const records: SessionRecords = {
+const actions: SessionActions = {
   create: () => Promise.resolve(),
   find: () => Promise.resolve(null),
   findActive: () => Promise.resolve([]),
@@ -30,15 +30,15 @@ const redis: RedisSessionStore = {
 
 describe("auth configuration", () => {
   it("creates an auth instance from valid adapters", () => {
-    const auth = createAuth({ records, redis });
+    const auth = createAuth({ actions, redis });
 
     assert.equal(auth.password.algorithm, "argon2id");
   });
 
   it("creates one Hono auth instance with core and HTTP methods", () => {
     const auth = createHonoAuth({
+      actions,
       getIp: () => null,
-      records,
       redis,
     });
 
@@ -50,11 +50,11 @@ describe("auth configuration", () => {
 
   it("rejects incomplete adapters during startup", () => {
     assert.throws(
-      () => createAuth({ records, redis: {} as RedisSessionStore }),
+      () => createAuth({ actions, redis: {} as RedisSessionStore }),
       (error) => isAuthError(error) && error.code === "AUTH_CONFIG_INVALID",
     );
     assert.throws(
-      () => createAuth({ records: null as never, redis }),
+      () => createAuth({ actions: null as never, redis }),
       (error) => isAuthError(error) && error.code === "AUTH_CONFIG_INVALID",
     );
   });

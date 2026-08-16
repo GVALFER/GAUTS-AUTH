@@ -19,7 +19,7 @@ export type {
   Session,
   SessionInput,
   SessionRecord,
-  SessionRecords,
+  SessionActions,
   SessionService,
 } from "./session/types.js";
 export type { SessionClient, SessionClientInput } from "./client/index.js";

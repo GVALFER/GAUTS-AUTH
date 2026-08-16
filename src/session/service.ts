@@ -10,15 +10,15 @@ import type {
   RedisSessionStore,
   SessionInput,
   SessionRecord,
-  SessionRecords,
+  SessionActions,
   SessionService,
   StoredSession,
 } from "./types.js";
 
 type SessionDeps = {
+  actions: SessionActions;
   config: ResolvedSessionConfig;
   now?: () => Date;
-  records: SessionRecords;
   redis: RedisSessionStore;
 };
 
@@ -44,9 +44,9 @@ const toActiveSession = (session: SessionRecord): ActiveSession => ({
 });
 
 export const createSessionService = <TData extends object>({
+  actions,
   config,
   now = () => new Date(),
-  records,
   redis,
 }: SessionDeps): SessionService<TData> => {
   const runRedis = async <T>(operation: () => Promise<T>): Promise<T> => {
@@ -65,7 +65,7 @@ export const createSessionService = <TData extends object>({
     }
   };
 
-  const runRecords = async <T>(operation: () => Promise<T>): Promise<T> => {
+  const runAction = async <T>(operation: () => Promise<T>): Promise<T> => {
     try {
       return await operation();
     } catch (error) {
@@ -75,16 +75,16 @@ export const createSessionService = <TData extends object>({
 
       throw createError({
         cause: error,
-        code: "RECORDS_UNAVAILABLE",
-        message: "Session records service unavailable.",
+        code: "SESSION_ACTION_FAILED",
+        message: "Session action failed.",
       });
     }
   };
 
   const getActive = async (accountId: string): Promise<SessionRecord[]> => {
     const current = now();
-    const rows = await runRecords(() =>
-      records.findActive({ accountId, now: current }),
+    const rows = await runAction(() =>
+      actions.findActive({ accountId, now: current }),
     );
 
     const valid = rows.filter(
@@ -120,7 +120,7 @@ export const createSessionService = <TData extends object>({
 
     await runRedis(() => redis.delete(rows.map((row) => row.tokenHash)));
     const ids = rows.map((row) => row.id);
-    await runRecords(() => records.revoke({ revokedAt, sessionIds: ids }));
+    await runAction(() => actions.revoke({ revokedAt, sessionIds: ids }));
 
     return ids;
   };
@@ -165,8 +165,8 @@ export const createSessionService = <TData extends object>({
       await runRedis(() => redis.delete([tokenHash]));
 
       try {
-        await runRecords(() =>
-          records.revoke({ revokedAt: current, sessionIds: [stored.id] }),
+        await runAction(() =>
+          actions.revoke({ revokedAt: current, sessionIds: [stored.id] }),
         );
       } catch (error) {
         throw createError({
@@ -222,8 +222,8 @@ export const createSessionService = <TData extends object>({
         });
       }
 
-      await runRecords(() =>
-        records.create({
+      await runAction(() =>
+        actions.create({
           accountId: input.accountId,
           client,
           createdAt,
@@ -239,14 +239,14 @@ export const createSessionService = <TData extends object>({
         );
       } catch (error) {
         try {
-          await runRecords(() =>
-            records.revoke({ revokedAt: now(), sessionIds: [id] }),
+          await runAction(() =>
+            actions.revoke({ revokedAt: now(), sessionIds: [id] }),
           );
-        } catch (recordsError) {
+        } catch (actionError) {
           throw createError({
-            cause: new AggregateError([error, recordsError]),
-            code: "RECORDS_UNAVAILABLE",
-            message: "Session creation and records compensation failed.",
+            cause: new AggregateError([error, actionError]),
+            code: "SESSION_ACTION_FAILED",
+            message: "Session creation compensation failed.",
           });
         }
 
@@ -284,8 +284,8 @@ export const createSessionService = <TData extends object>({
         touchedAt: current.toISOString(),
       };
 
-      await runRecords(() =>
-        records.updateExpiry({
+      await runAction(() =>
+        actions.updateExpiry({
           expiresAt,
           sessionId: stored.id,
           updatedAt: current,
@@ -327,17 +327,15 @@ export const createSessionService = <TData extends object>({
         return [];
       }
 
-      await runRecords(() =>
-        records.revoke({ revokedAt: now(), sessionIds: [stored.id] }),
+      await runAction(() =>
+        actions.revoke({ revokedAt: now(), sessionIds: [stored.id] }),
       );
 
       return [stored.id];
     },
 
     revoke: async ({ accountId, sessionId }) => {
-      const row = await runRecords(() =>
-        records.find({ accountId, sessionId }),
-      );
+      const row = await runAction(() => actions.find({ accountId, sessionId }));
 
       if (row?.revokedAt !== null) {
         throw createError({

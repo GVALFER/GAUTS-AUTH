@@ -1,5 +1,5 @@
 import { Hono, type Context } from "hono";
-import { isAuthError, type SessionRecords } from "@gauts/auth";
+import { isAuthError, type SessionActions } from "@gauts/auth";
 import { createHonoAuth, type HonoAuthEnv } from "@gauts/auth/hono";
 import { createRedisStore } from "@gauts/auth/redis";
 import type { RedisClientType } from "redis";
@@ -15,23 +15,23 @@ type Account = AccountSession & {
 };
 
 type ExampleDeps = {
+  actions: SessionActions;
   findAccount: (email: string) => Promise<Account | null>;
   getIp: (
     c: Context,
   ) => Promise<string | null | undefined> | string | null | undefined;
-  records: SessionRecords;
   redis: RedisClientType;
 };
 
 export const createApp = ({
+  actions,
   findAccount,
   getIp,
-  records,
   redis,
 }: ExampleDeps) => {
   const auth = createHonoAuth<AccountSession>({
+    actions,
     getIp,
-    records,
     redis: createRedisStore({
       client: redis,
       config: { prefix: "example:auth" },
@@ -45,7 +45,8 @@ export const createApp = ({
     }
 
     const status =
-      error.code === "REDIS_UNAVAILABLE" || error.code === "RECORDS_UNAVAILABLE"
+      error.code === "REDIS_UNAVAILABLE" ||
+      error.code === "SESSION_ACTION_FAILED"
         ? 503
         : 401;
 

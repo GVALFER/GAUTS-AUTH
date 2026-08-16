@@ -9,8 +9,8 @@ import { hashToken, tokenPattern } from "../src/session/token.js";
 import type {
   CreateSessionRecord,
   RedisSessionStore,
+  SessionActions,
   SessionRecord,
-  SessionRecords,
 } from "../src/session/types.js";
 
 type Data = {
@@ -70,10 +70,10 @@ const createRedis = () => {
   return { redisCalls: calls, store, ttls, values };
 };
 
-const createRecords = () => {
+const createActions = () => {
   const rows = new Map<string, SessionRecord>();
   const calls = { create: 0, findActive: 0, revoke: 0, updateExpiry: 0 };
-  const records: SessionRecords = {
+  const actions: SessionActions = {
     async create(input: CreateSessionRecord) {
       calls.create += 1;
       rows.set(input.id, { ...input, revokedAt: null, updatedAt: null });
@@ -106,7 +106,7 @@ const createRecords = () => {
     },
   };
 
-  return { records, recordsCalls: calls, rows };
+  return { actionCalls: calls, actions, rows };
 };
 
 const createHarness = (
@@ -114,8 +114,9 @@ const createHarness = (
 ) => {
   let current = new Date("2026-08-15T12:00:00.000Z");
   const redis = createRedis();
-  const sessionRecords = createRecords();
+  const sessionActions = createActions();
   const session = createSessionService<Data>({
+    actions: sessionActions.actions,
     config: resolveSessionConfig({
       max: 2,
       renewInterval: 60,
@@ -123,13 +124,12 @@ const createHarness = (
       validation,
     }),
     now: () => new Date(current),
-    records: sessionRecords.records,
     redis: redis.store,
   });
 
   return {
     ...redis,
-    ...sessionRecords,
+    ...sessionActions,
     advance(seconds: number) {
       current = new Date(current.getTime() + seconds * 1000);
     },
@@ -160,14 +160,14 @@ describe("session service", () => {
     assert.equal(harness.ttls.get(tokenHash), 300);
   });
 
-  it("authenticates from Redis without a records lookup", async () => {
+  it("authenticates from Redis without a session action lookup", async () => {
     const harness = createHarness();
     const created = await harness.session.create({
       client,
       data: { email: "owner@example.com", role: "owner" },
       accountId: "account-1",
     });
-    const findCalls = harness.recordsCalls.findActive;
+    const findCalls = harness.actionCalls.findActive;
     const resolved = await harness.session.resolve({
       client: { ip: "2001:db8::1", userAgent: client.userAgent },
       token: created.token,
@@ -175,8 +175,8 @@ describe("session service", () => {
 
     assert.equal(resolved?.renewed, false);
     assert.equal(resolved?.session.accountId, "account-1");
-    assert.equal(harness.recordsCalls.findActive, findCalls);
-    assert.equal(harness.recordsCalls.updateExpiry, 0);
+    assert.equal(harness.actionCalls.findActive, findCalls);
+    assert.equal(harness.actionCalls.updateExpiry, 0);
   });
 
   it("renews the same session token after renewInterval without an absolute expiry", async () => {
@@ -198,7 +198,7 @@ describe("session service", () => {
     assert.ok(
       (renewed?.session.expiresAt.getTime() ?? 0) > originalExpiry.getTime(),
     );
-    assert.equal(harness.recordsCalls.updateExpiry, 1);
+    assert.equal(harness.actionCalls.updateExpiry, 1);
     assert.equal(harness.redisCalls.update, 1);
 
     harness.advance(240);
@@ -230,7 +230,7 @@ describe("session service", () => {
       validated?.expiresAt.getTime(),
       created.session.expiresAt.getTime(),
     );
-    assert.equal(harness.recordsCalls.updateExpiry, 0);
+    assert.equal(harness.actionCalls.updateExpiry, 0);
     assert.equal(harness.redisCalls.update, 0);
 
     const resolved = await harness.session.resolve({

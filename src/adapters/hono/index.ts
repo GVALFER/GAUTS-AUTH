@@ -252,15 +252,15 @@ export const createHonoAdapter = <TData extends object>({
 };
 
 export const createHonoAuth = <TData extends object = Record<string, unknown>>({
+  actions,
   cookie,
   getIp,
   password,
-  records,
   redis,
   session,
 }: HonoAuthConfig): HonoAuth<TData> => {
   const auth = createAuth<TData>({
-    records,
+    actions,
     redis,
     ...(password === undefined ? {} : { password }),
     ...(session === undefined ? {} : { session }),

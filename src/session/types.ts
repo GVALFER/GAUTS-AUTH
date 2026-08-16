@@ -61,7 +61,7 @@ export type CreateSessionRecord = Omit<
 
 export type ActiveSession = Omit<SessionRecord, "tokenHash">;
 
-export type SessionRecords = {
+export type SessionActions = {
   create(session: CreateSessionRecord): Promise<void>;
   find(input: {
     accountId: string;
