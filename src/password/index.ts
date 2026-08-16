@@ -62,7 +62,6 @@ const createBcrypt = (
 
     hash: async (password) => {
         requirePassword({ maxBytes: config.maxBytes, password });
-
         return hashBcrypt(password, config.rounds);
     },
 

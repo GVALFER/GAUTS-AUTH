@@ -55,7 +55,6 @@ export const normalizeIp = (input?: string | null): string | null => {
 
 const normalizePlatform = (input?: string | null): string | null => {
     const value = input?.replace(/^"+|"+$/g, "").trim();
-
     return value ? value.slice(0, 255) : null;
 };
 
