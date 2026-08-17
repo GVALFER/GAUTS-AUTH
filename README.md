@@ -641,7 +641,18 @@ Result values:
 
 The adapter copies every returned `Set-Cookie` header to the browser response. It forwards only the session cookie and controlled client/origin headers required by the private API. Other cookies, authorization headers, and arbitrary headers are not forwarded.
 
-`FORWARD_HEADERS` is exported from `@gauts/auth/next` for application fetchers that need the same controlled header list.
+`buildForwardHeaders()` and `FORWARD_HEADERS` are exported from `@gauts/auth/next` for application fetchers that need the same controlled forwarding rules:
+
+```ts
+import { buildForwardHeaders } from "@gauts/auth/next";
+
+const headers = buildForwardHeaders({
+    headers: incoming,
+    extra: ["cookie", "authorization"],
+});
+```
+
+Safe client and proxy metadata is copied by default. Credentials such as `cookie` and `authorization` are excluded unless explicitly listed in `extra`.
 
 When `Origin` is absent and trusted `X-Forwarded-Proto` and `X-Forwarded-Host` headers exist, the adapter reconstructs the public origin from them. It never derives a public origin from the internal Next.js request URL. The deployment proxy must overwrite forwarded headers received from untrusted clients.
 

@@ -32,18 +32,26 @@ export type NextAuth = {
     renew(input: NextRenewInput): Promise<NextRenewResult>;
 };
 
-type ForwardHeadersInput = {
+type RenewHeadersInput = {
     request: NextRequest;
     sessionName: string;
     token: string;
 };
 
+export type BuildForwardHeadersInput = {
+    extra?: readonly string[];
+    headers: Headers;
+};
+
 const RENEW_TIMEOUT = 5_000;
 
 export const FORWARD_HEADERS = [
+    "accept-language",
     "cf-connecting-ip",
     "origin",
     "referer",
+    "sec-ch-ua",
+    "sec-ch-ua-mobile",
     "sec-ch-ua-platform",
     "sec-fetch-dest",
     "sec-fetch-mode",
@@ -53,9 +61,35 @@ export const FORWARD_HEADERS = [
     "user-agent",
     "x-forwarded-for",
     "x-forwarded-host",
+    "x-forwarded-port",
     "x-forwarded-proto",
     "x-real-ip",
 ] as const;
+
+export const buildForwardHeaders = ({
+    extra = [],
+    headers: incoming,
+}: BuildForwardHeadersInput): Headers => {
+    const headers = new Headers();
+
+    for (const name of [...FORWARD_HEADERS, ...extra]) {
+        const value = incoming.get(name);
+
+        if (value?.trim()) {
+            headers.set(name, value);
+        }
+    }
+
+    const origin = headers.get("origin")?.trim();
+    const host = headers.get("x-forwarded-host")?.trim();
+    const proto = headers.get("x-forwarded-proto")?.trim();
+
+    if (!origin && host && proto) {
+        headers.set("origin", `${proto}://${host}`);
+    }
+
+    return headers;
+};
 
 const getSetCookies = (headers: Headers): string[] => {
     const cookieHeaders = headers as Headers & {
@@ -70,24 +104,9 @@ const getSetCookies = (headers: Headers): string[] => {
     return cookie ? [cookie] : [];
 };
 
-const getForwardHeaders = ({ request, sessionName, token }: ForwardHeadersInput): Headers => {
-    const headers = new Headers({ cookie: `${sessionName}=${token}` });
-
-    for (const header of FORWARD_HEADERS) {
-        const value = request.headers.get(header);
-
-        if (value !== null) {
-            headers.set(header, value);
-        }
-    }
-
-    const origin = headers.get("origin")?.trim();
-    const host = headers.get("x-forwarded-host")?.trim();
-    const proto = headers.get("x-forwarded-proto")?.trim();
-
-    if (!origin && host && proto) {
-        headers.set("origin", `${proto}://${host}`);
-    }
+const getRenewHeaders = ({ request, sessionName, token }: RenewHeadersInput): Headers => {
+    const headers = buildForwardHeaders({ headers: request.headers });
+    headers.set("cookie", `${sessionName}=${token}`);
 
     return headers;
 };
@@ -137,7 +156,7 @@ export const createNextAuth = ({ cookie, renewUrl }: NextAuthConfig): NextAuth =
 
             const renewal = await fetch(url.toString(), {
                 cache: "no-store",
-                headers: getForwardHeaders({ request, sessionName: names.sessionName, token }),
+                headers: getRenewHeaders({ request, sessionName: names.sessionName, token }),
                 method: "POST",
                 redirect: "error",
                 signal: AbortSignal.timeout(RENEW_TIMEOUT),
