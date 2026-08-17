@@ -350,7 +350,7 @@ The cache is signed but not encrypted. Do not place passwords, password hashes, 
 
 ### Prisma adapter
 
-The default adapter requires the Prisma models `sessions` and `account`. The session model must expose an `account` relation. The account model must contain string `id`, `email`, and `password_hash` fields. Only `account.id` and `account.email` enter the payload by default.
+The default adapter requires the Prisma models `sessions` and `account`. The session model must expose an `account` relation. The default account model must contain string `id`, `email`, and `password_hash` fields. Custom account models require string `id` and `email`; their password column remains application-defined because the session adapter never reads it. Only `account.id` and `account.email` enter the payload by default.
 
 #### Default models
 
@@ -444,7 +444,7 @@ This loads the `account.owner` relation using the `prisma.users` model metadata.
 | ------------------------------------- | ----------------------------------------- | :------: | -------------------- | --------------------------------------------------------------------------- |
 | `client`                              | Generated Prisma client                   |    ✅    | —                    | Prisma client containing every configured model.                            |
 | `models.sessions.name`                | Compatible session delegate name          |    ❌    | `"sessions"`         | Overrides the Prisma model used to persist sessions.                         |
-| `models.account.name`                 | Compatible account delegate name          |    ❌    | `"account"`          | Identifies the account model and types its configuration.                    |
+| `models.account.name`                 | Account delegate with string `id`, `email` |    ❌    | `"account"`          | Identifies a custom account model. Its password column may use any name.      |
 | `models.account.select`               | Unique scalar field array                 |    ❌    | `["id", "email"]`    | Fields exposed in `account` and the signed cache. `id` is always included.   |
 | `models.account.access`               | Scalar equality or allowed-value arrays   |    ❌    | `{}`                 | Conditions required for authentication.                                     |
 | `models.account.relations`            | Relation configuration object             |    ❌    | `{}`                 | Additional required to-one relations loaded inside `account`.               |

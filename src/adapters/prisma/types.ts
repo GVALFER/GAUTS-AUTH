@@ -26,10 +26,16 @@ type IsAccountModel<T> =
         : DelegateRow<T> extends {
                 email: string;
                 id: string;
-                password_hash: string;
             }
           ? true
           : false;
+
+type IsDefaultAccountModel<T> =
+    IsAccountModel<T> extends true
+        ? DelegateRow<T> extends { password_hash: string }
+            ? true
+            : false
+        : false;
 
 export type PrismaSessionModel<Client> = {
     [Key in keyof Client]: IsSessionModel<Client[Key]> extends true ? Key : never;
@@ -76,10 +82,12 @@ type AccountChoice<Client, NameRequired extends boolean> = {
 }[PrismaAccountModel<Client>];
 
 type DefaultAccountConfig<Client> =
-    "account" extends PrismaAccountModel<Client>
-        ? Omit<ModelConfig<Client, "account", false>, "name"> & {
-              name?: "account";
-          }
+    "account" extends keyof Client
+        ? IsDefaultAccountModel<Client["account"]> extends true
+            ? Omit<ModelConfig<Client, "account", false>, "name"> & {
+                  name?: "account";
+              }
+            : never
         : never;
 
 type CustomAccountConfig<Client> = AccountChoice<Client, true>;
@@ -100,8 +108,10 @@ export type PrismaSessionConfig<Client> =
     DefaultSessionConfig<Client> | CustomSessionConfig<Client>;
 
 type AccountProperty<Client> =
-    "account" extends PrismaAccountModel<Client>
-        ? { account?: PrismaAccountConfig<Client> }
+    "account" extends keyof Client
+        ? IsDefaultAccountModel<Client["account"]> extends true
+            ? { account?: PrismaAccountConfig<Client> }
+            : { account: CustomAccountConfig<Client> }
         : { account: CustomAccountConfig<Client> };
 
 type SessionProperty<Client> =
@@ -112,9 +122,11 @@ type SessionProperty<Client> =
 export type PrismaModelsConfig<Client> = AccountProperty<Client> & SessionProperty<Client>;
 
 type HasDefaults<Client> =
-    "account" extends PrismaAccountModel<Client>
-        ? "sessions" extends PrismaSessionModel<Client>
-            ? true
+    "account" extends keyof Client
+        ? IsDefaultAccountModel<Client["account"]> extends true
+            ? "sessions" extends PrismaSessionModel<Client>
+                ? true
+                : false
             : false
         : false;
 

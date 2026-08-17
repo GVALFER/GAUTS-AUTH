@@ -44,6 +44,12 @@ type UserRow = {
     status: string;
 };
 
+type LegacyAccountRow = {
+    email: string;
+    hash: string;
+    id: string;
+};
+
 const row: SessionRecord = {
     account_id: "account-1",
     agent: "Test Agent",
@@ -137,6 +143,7 @@ const createClient = () => {
         calls: sessions.calls,
         client: {
             account: createModelDelegate<AccountRow>(),
+            legacy_accounts: createModelDelegate<LegacyAccountRow>(),
             sessions: sessions.delegate,
             user: createModelDelegate<UserRow>(),
             user_accounts: createModelDelegate<AccountRow>(),
@@ -149,8 +156,10 @@ const assertTypes = () => {
     const { client } = createClient();
     const sessionModel: PrismaSessionModel<typeof client> = "sessions";
     const accountModel: PrismaAccountModel<typeof client> = "user_accounts";
+    const legacyAccountModel: PrismaAccountModel<typeof client> = "legacy_accounts";
     void sessionModel;
     void accountModel;
+    void legacyAccountModel;
 
     // @ts-expect-error user_accounts does not implement the session schema.
     const invalidSession: PrismaSessionModel<typeof client> = "user_accounts";
@@ -166,6 +175,23 @@ const assertTypes = () => {
 
     const defaults = { client } satisfies PrismaAdapterInput<typeof client>;
     void defaults;
+
+    const legacy = {
+        client,
+        models: {
+            account: {
+                name: "legacy_accounts",
+            },
+        },
+    } satisfies PrismaAdapterInput<
+        typeof client,
+        {
+            account: {
+                name: "legacy_accounts";
+            };
+        }
+    >;
+    void legacy;
 
     const defaultDb = createPrismaAdapter({ client });
     void defaultDb;
