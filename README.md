@@ -115,8 +115,13 @@ import { DUMMY_PASSWORD_HASH } from "./password.js";
 const app = new Hono<HonoAuthEnv>();
 
 app.post("/auth/login", async (c) => {
-    const body = await c.req.json<{ email: string; password: string }>();
+    const body = await c.req.json<{
+        email: string;
+        password: string;
+    }>();
+
     const account = await findAccount(body.email);
+
     const passwordValid = await auth.password.verify({
         password: body.password,
         storedHash: account?.passwordHash ?? DUMMY_PASSWORD_HASH,
