@@ -1,110 +1,461 @@
 # `@gauts/auth`
 
-Reusable password authentication and database-backed opaque sessions for Node.js applications.
+Database-backed password authentication and opaque browser sessions for Node.js applications.
 
-The package stores only a SHA-256 token hash in the database. Browser integration uses three cookies with separate responsibilities:
+`@gauts/auth` provides the reusable authentication layer: password hashing, session lifecycle, secure cookies, database validation, optional short caching, and framework adapters. The application keeps control of registration, account lookup, authorization, routes, responses, and UI.
 
-```text
-session cookie -> opaque token
-cache cookie   -> short signed session snapshot
-renew cookie   -> untrusted renewAt timestamp
-```
+## Features
 
-Only the opaque session token authenticates. It remains stable during sliding renewal, but the session can never exceed its configured maximum lifetime. The optional cache is disabled when omitted and never replaces database validation for unsafe methods, renewal, logout, WebSockets, or direct core calls.
+| Capability | Support | Default |
+| --- | :---: | --- |
+| Argon2id password hashing | ✅ | Enabled |
+| bcrypt password hashing | ✅ | Opt-in |
+| Opaque server-side sessions | ✅ | Enabled |
+| Database-backed validation | ✅ | Enabled |
+| Sliding session renewal | ✅ | Every 24 hours |
+| Absolute session lifetime | ✅ | 30 days |
+| Signed browser cache | ✅ | Disabled |
+| Full User-Agent validation | ✅ | Enabled |
+| IP validation | ✅ | Disabled |
+| Platform validation | ✅ | Disabled |
+| Hono adapter | ✅ | Available |
+| Prisma adapter | ✅ | Available |
+| Next.js renewal adapter | ✅ | Available |
+| Session listing and revocation | ✅ | Available |
+| Token rotation | ❌ | Stable opaque token |
+| JWT sessions | ❌ | Not used |
+| Redis requirement | ❌ | Not required |
+| Registration, OAuth, OTP, or email | ❌ | Application-owned |
+| Route roles and permissions | ❌ | Application-owned |
 
-## Requirements
-
-- Node.js 22 or newer.
-- A database adapter, or a Prisma client containing the required schema contract.
-- Hono 4 when using `@gauts/auth/hono`.
-- Next.js 15 or newer when using `@gauts/auth/next`.
+“Session renewal” extends the existing session expiry when activity continues. It is not a refresh-token flow and does not rotate the opaque browser token.
 
 ## Installation
 
-For Hono and Prisma:
+### Requirements
+
+- Node.js 22 or newer.
+- A database adapter.
+- Hono 4 when using the Hono adapter.
+- Next.js 15 or newer when using the Next.js adapter.
+
+### Hono and Prisma
 
 ```bash
 npm install @gauts/auth hono @prisma/client
 ```
 
-For the Next.js adapter, the application must already use Next.js:
+### Next.js
 
 ```bash
 npm install @gauts/auth next
 ```
 
-`hono` and `next` are optional peer dependencies. The Prisma adapter receives the consuming application's generated client and does not import Prisma at runtime.
+`hono` and `next` are optional peer dependencies. The Prisma adapter receives the application's generated Prisma client and does not import Prisma at runtime.
 
-## Package entry points
+### Package entry points
 
 | Import | Purpose |
 | --- | --- |
-| `@gauts/auth` | Framework-independent password and session core types. |
-| `@gauts/auth/prisma` | Prisma implementation of the database adapter. |
-| `@gauts/auth/hono` | Hono cookies, session methods, and middleware. |
+| `@gauts/auth` | Password service, session core, errors, and public types. |
+| `@gauts/auth/prisma` | Prisma database adapter. |
+| `@gauts/auth/hono` | Hono cookies, methods, and middleware. |
 | `@gauts/auth/next` | Next.js renewal scheduling and `Set-Cookie` forwarding. |
 
-## Flow
+## Quick start
 
-Login:
+The Hono adapter does not create routes automatically. The application defines its own login, renewal, logout, and protected endpoints.
+
+### 1. Create the auth instance
+
+```ts
+import { createHonoAuth } from "@gauts/auth/hono";
+import { createPrismaAdapter } from "@gauts/auth/prisma";
+
+import { prisma } from "./db.js";
+import { getTrustedClientIp } from "./getTrustedClientIp.js";
+
+export const auth = createHonoAuth({
+    db: createPrismaAdapter({
+        client: prisma,
+        config: {
+            account: {
+                status: ["ACTIVE"],
+            },
+            user: {
+                status: ["ACTIVE"],
+            },
+        },
+    }),
+    getIp: getTrustedClientIp,
+});
+```
+
+This uses the defaults:
+
+```text
+password       Argon2id
+session TTL    7 days
+renewal        every 24 hours
+max lifetime   30 days
+validation     User-Agent
+cache          disabled
+cookies        __ses, __cac, __ren
+```
+
+### 2. Add the routes
+
+```ts
+import { Hono } from "hono";
+import type { HonoAuthEnv } from "@gauts/auth/hono";
+
+import { auth } from "./auth.js";
+import { DUMMY_PASSWORD_HASH } from "./password.js";
+
+const app = new Hono<HonoAuthEnv>();
+
+app.post("/auth/login", async (c) => {
+    const body = await c.req.json<{ email: string; password: string }>();
+    const account = await findAccount(body.email);
+    const passwordValid = await auth.password.verify({
+        password: body.password,
+        storedHash: account?.passwordHash ?? DUMMY_PASSWORD_HASH,
+    });
+
+    if (!account || !passwordValid) {
+        return c.json({ error: "Invalid credentials." }, 401);
+    }
+
+    await auth.createSession({
+        account_id: account.id,
+        context: c,
+    });
+
+    return c.json({ authenticated: true });
+});
+
+app.post("/auth/renew", async (c) => {
+    await auth.renewSession(c);
+    return c.body(null, 204);
+});
+
+app.post("/auth/logout", async (c) => {
+    await auth.revokeSession(c);
+    return c.body(null, 204);
+});
+
+app.get("/account", auth.requireSession, (c) => {
+    return c.json({
+        account: c.get("account"),
+        session: c.get("session"),
+        user: c.get("user"),
+    });
+});
+```
+
+Precompute `DUMMY_PASSWORD_HASH` once with the same algorithm and cost as the application. This ensures unknown accounts perform equivalent password verification work. Keep the response identical for unknown accounts and incorrect passwords.
+
+### 3. Enable the optional cache
+
+```ts
+export const auth = createHonoAuth({
+    cache: {
+        ttl: 60,
+    },
+    db,
+    getIp: getTrustedClientIp,
+    secret: requiredEnv("AUTH_SECRET"),
+});
+```
+
+`AUTH_SECRET` must contain at least 32 high-entropy bytes. It stays in the API and is never shared with Next.js.
+
+`requiredEnv()` represents an application helper that returns a non-empty environment string or fails during startup.
+
+## Configuration reference
+
+### `createHonoAuth()`
+
+| Property | Type / allowed values | Required | Default | Description |
+| --- | --- | :---: | --- | --- |
+| `db` | `DbAdapter` | ✅ | — | Authoritative session persistence and account loading. |
+| `getIp` | `HonoGetIp` | ✅ | — | Returns the client IP from a source trusted by the application. May be synchronous or asynchronous. |
+| `password` | `PasswordConfig` | ❌ | Argon2id defaults | Password hashing and verification configuration. |
+| `session` | `SessionConfig` | ❌ | Session defaults | Expiry, renewal, and client validation configuration. |
+| `cookie` | `HonoCookieConfig` | ❌ | Cookie defaults | Names, domain, path, SameSite, and Secure settings. |
+| `cache` | `{ ttl: number }` | ❌ | Disabled | Enables the short signed browser cache. |
+| `secret` | `string` | When `cache` is enabled | — | HMAC secret for the signed cache. Minimum 32 UTF-8 bytes. |
+
+```ts
+type HonoGetIp = (
+    c: Context,
+) => Promise<string | null | undefined> | string | null | undefined;
+```
+
+### Password
+
+#### Argon2id
+
+Argon2id is selected when `password.algorithm` is omitted or set to `"argon2id"`.
+
+| Property | Type / allowed values | Default | Description |
+| --- | --- | ---: | --- |
+| `algorithm` | `"argon2id"` | `"argon2id"` | Password algorithm used for both hashing and verification. |
+| `hashLength` | Integer `16`–`64` | `32` | Output hash length in bytes. |
+| `maxBytes` | Integer `1`–`1,048,576` | `1024` | Maximum UTF-8 password size accepted by hashing and verification. |
+| `memoryCost` | Integer `8,192`–`1,048,576` | `65,536` | Argon2 memory cost in KiB. |
+| `parallelism` | Integer `1`–`16` | `4` | Number of parallel lanes. |
+| `timeCost` | Integer `1`–`10` | `3` | Number of Argon2 iterations. |
+
+```ts
+password: {
+    algorithm: "argon2id",
+}
+```
+
+#### bcrypt
+
+Applications with existing bcrypt hashes must select bcrypt explicitly.
+
+| Property | Type / allowed values | Default | Description |
+| --- | --- | ---: | --- |
+| `algorithm` | `"bcrypt"` | Required | Selects bcrypt for both hashing and verification. |
+| `maxBytes` | Integer `1`–`72` | `72` | Maximum UTF-8 size accepted for new passwords. |
+| `rounds` | Integer `4`–`31` | `12` | bcrypt cost factor. |
+| `verifyMaxBytes` | Integer from `maxBytes` to `1,048,576` | `72` | Maximum input accepted while verifying existing hashes. |
+
+```ts
+password: {
+    algorithm: "bcrypt",
+}
+```
+
+The package does not detect algorithms, migrate hashes, rehash passwords, or fall back to another algorithm.
+
+### Session
+
+All time values are seconds.
+
+| Property | Type / allowed values | Default | Description |
+| --- | --- | ---: | --- |
+| `maxLifetime` | Integer from `ttl` to `31,536,000` | `2,592,000` (30 days) | Maximum session lifetime from the original login, regardless of activity. |
+| `renewInterval` | Integer `1` to `ttl - 1` | `86,400` (24 hours) | Minimum interval before sliding renewal is due. |
+| `ttl` | Integer `60`–`31,536,000` | `604,800` (7 days) | Inactivity lifetime assigned at login and renewal. |
+| `validation` | Unique array of `"agent"`, `"ip"`, `"platform"` | `["agent"]` | Client fields that must match the stored session exactly. |
+
+```ts
+session: {
+    maxLifetime: 60 * 60 * 24 * 30,
+    renewInterval: 60 * 60 * 24,
+    ttl: 60 * 60 * 24 * 7,
+    validation: ["agent", "ip"],
+}
+```
+
+Validation values:
+
+| Enum | Source | Behavior |
+| --- | --- | --- |
+| `"agent"` | Complete `User-Agent` header | Enabled by default. The complete value must match. |
+| `"ip"` | Application-provided `getIp()` result | IPv4 and IPv6 are canonicalized before exact comparison. |
+| `"platform"` | `Sec-CH-UA-Platform` header | Normalized and compared exactly. |
+
+Every selected field is required during session creation and validation. A mismatch revokes the database session.
+
+Expiry is derived as follows:
+
+```text
+maxExpiresAt = created_at + maxLifetime
+expires_at   = min(now + ttl, maxExpiresAt)
+renew_at     = min((updated_at ?? created_at) + renewInterval, maxExpiresAt)
+```
+
+### Cookies
+
+| Property | Type / allowed values | Default | Description |
+| --- | --- | --- | --- |
+| `sessionName` | Valid cookie name | `"__ses"` | Contains the opaque token. This is the only authenticating cookie. |
+| `cacheName` | Valid cookie name | `"__cac"` | Contains the optional signed short cache. |
+| `renewName` | Valid cookie name | `"__ren"` | Contains the untrusted `renew_at` Unix timestamp. |
+| `domain` | `string` | Browser host only | Optional cookie domain. |
+| `path` | String beginning with `/` | `"/"` | Cookie path. |
+| `sameSite` | `"Strict" \| "Lax" \| "None"` | `"Lax"` | Browser SameSite policy. |
+| `secure` | `boolean` | `true` | Requires HTTPS when enabled. Set `false` only for local HTTP development. |
+
+All three cookies are always `HttpOnly` and expire with their respective server-side purpose. Their names must be unique.
+
+Cookie prefix rules are enforced:
+
+- `__Host-` requires `secure: true`, `path: "/"`, and no `domain`.
+- `__Secure-` requires `secure: true`.
+- `SameSite=None` requires `secure: true`.
+
+SameSite values:
+
+| Enum | Behavior |
+| --- | --- |
+| `"Strict"` | Sends cookies only in same-site contexts. |
+| `"Lax"` | Sends cookies in same-site contexts and eligible top-level safe navigations. |
+| `"None"` | Allows cross-site cookie use and requires `secure: true`. |
+
+The resolved names are available through:
+
+```ts
+auth.cookie.sessionName; // "__ses"
+auth.cookie.cacheName;   // "__cac"
+auth.cookie.renewName;   // "__ren"
+```
+
+### Signed cache
+
+| Property | Type / allowed values | Default | Description |
+| --- | --- | --- | --- |
+| `cache.ttl` | Integer `1` to `session.ttl` | Disabled | Maximum cache lifetime in seconds. |
+| `secret` | String with at least 32 UTF-8 bytes | — | Signs the cache with HMAC-SHA-256. Required with `cache`. |
+
+The cache:
+
+- is cryptographically bound to the opaque token and client identity;
+- is accepted only for `GET` and `HEAD`;
+- never extends the authoritative database session;
+- is bypassed for unsafe methods, renewal, logout, WebSockets, and core calls;
+- falls back to normal database authentication when absent, expired, malformed, or altered.
+
+The cache is signed but not encrypted. Do not place passwords, password hashes, raw session tokens, or application secrets in account/session data.
+
+<details>
+<summary>Internal compact cache payload</summary>
+
+```ts
+{
+    exp: cacheExpiresAt,
+    acc: {
+        id,
+        email,
+        name,
+        role,
+        status,
+        timezone,
+        usr: { id, role, status },
+    },
+    ses: {
+        id,
+        client: { ip, agent, platform },
+        created_at,
+        exp: expiresAt,
+        ren: renewAt,
+    },
+}
+```
+
+`session.account_id` is reconstructed from `acc.id` after signature validation.
+
+</details>
+
+### Prisma adapter
+
+```ts
+const db = createPrismaAdapter({
+    client: prisma,
+    config: {
+        account: {
+            role: ["OWNER", "ADMIN"],
+            status: ["ACTIVE"],
+        },
+        table: "account_sessions",
+        user: {
+            status: ["ACTIVE"],
+        },
+    },
+});
+```
+
+| Property | Type / allowed values | Required | Default | Description |
+| --- | --- | :---: | --- | --- |
+| `client` | Generated Prisma client | ✅ | — | Prisma client containing the session delegate. |
+| `config.table` | Compatible Prisma delegate name | Only without `account_sessions` | `"account_sessions"` | Model delegate used to store sessions. This is not the physical table name. |
+| `config.account.status` | Non-empty unique `string[]` | ✅ | — | Account statuses allowed to authenticate. Values come from the application enum. |
+| `config.account.role` | Non-empty unique `string[]` | ❌ | All roles | Optional account-role allowlist. Values come from the application enum. |
+| `config.user.status` | Non-empty unique `string[]` | ✅ | — | User statuses allowed to authenticate. Values come from the application enum. |
+| `config.user.role` | Non-empty unique `string[]` | ❌ | All roles | Optional user-role allowlist. Values come from the application enum. |
+
+Status and role values are deliberately dynamic. The package does not define application-specific enums.
+
+### Next.js adapter
+
+```ts
+import { createNextAuth } from "@gauts/auth/next";
+
+export const nextAuth = createNextAuth({
+    renewUrl: `${process.env.NEXT_PRIVATE_API_URL}/auth/renew`,
+});
+```
+
+| Property | Type / allowed values | Required | Default | Description |
+| --- | --- | :---: | --- | --- |
+| `renewUrl` | Absolute `http:` or `https:` URL | ✅ | — | Trusted private API renewal endpoint. |
+| `cookie.sessionName` | Valid cookie name | ❌ | `"__ses"` | Session cookie read and forwarded to the API. |
+| `cookie.renewName` | Valid cookie name | ❌ | `"__ren"` | Renewal scheduling cookie read by Next.js. |
+
+## Session flow
+
+### Login
 
 ```text
 credentials accepted
     -> generate 256-bit opaque token
     -> store SHA-256 token hash in DB
-    -> load current account and user relations
-    -> validate configured status and role rules
-    -> write opaque session token cookie
-    -> write renewAt as Unix seconds
-    -> optionally write signed short cache
+    -> load current account and user
+    -> apply configured access rules
+    -> write __ses
+    -> write __ren
+    -> optionally write __cac
 ```
 
-Protected `GET` or `HEAD`:
+Only the raw browser token authenticates. The database stores only its SHA-256 hash.
+
+### Protected `GET` or `HEAD`
 
 ```text
-opaque session token
-    -> valid signed cache bound to token and client?
-        -> yes: expose cached session, account, and user
-        -> no: perform indexed DB validation and issue a fresh cache
+session token
+    -> valid signed cache?
+        -> yes: expose cached account, user, and session
+        -> no: validate through DB and create a fresh cache
 ```
 
-Unsafe methods and direct core calls:
+### Unsafe request
 
 ```text
-opaque session token
-    -> SHA-256 token
+session token
+    -> SHA-256 hash
     -> indexed DB lookup
-    -> expiry, revocation, account, user, and client validation
-    -> clear any existing cache after successful unsafe validation
-    -> route
+    -> validate expiry, revocation, account, user, and client
+    -> clear short cache
+    -> continue
 ```
 
-Renewal:
+### Renewal
 
 ```text
-Next reads renewAt from the renewal cookie
-    -> valid future Unix timestamp: no API call
-    -> missing, invalid, or due timestamp: POST /auth/renew
-    -> API performs full DB validation
-    -> DB expires_at = min(now + ttl, created_at + maxLifetime)
-    -> Set-Cookie with same token, a new renewAt, and a fresh cache
+Next reads __ren
+    -> future timestamp: no API request
+    -> missing, invalid, or due: POST /auth/renew
+    -> API validates through DB
+    -> update expires_at when renewal is due
+    -> Set-Cookie with the same token, new renewAt, and fresh cache
 ```
 
-`auth.session.resolve()` is always DB-backed and read-only. Only the explicit renewal operation updates database expiry, and neither activity nor renewal can extend the session beyond `maxLifetime`.
+`auth.session.resolve()` is always DB-backed and read-only. Only explicit renewal updates database expiry.
 
-## Prisma schema contract
+## Prisma schema
 
-The Prisma adapter resolves authentication through this relation chain:
+The Prisma adapter resolves:
 
 ```text
 account_sessions -> account -> user
 ```
 
-The default Prisma client delegate is `account_sessions`. A different session model delegate can be selected through `config.table`.
-
-### Complete minimal schema
-
-This is a complete MySQL/MariaDB example. If `users` and `user_accounts` already exist, merge the required fields and relations into those models instead of duplicating them.
+The following is a complete MySQL/MariaDB example. Merge the required fields and relations into existing account and user models when applicable.
 
 ```prisma
 model users {
@@ -150,7 +501,7 @@ model account_sessions {
 }
 ```
 
-The adapter requires these Prisma field and relation names:
+Required fields and relation names:
 
 | Path | Required fields |
 | --- | --- |
@@ -158,98 +509,25 @@ The adapter requires these Prisma field and relation names:
 | `account` relation | `id`, `email`, `name`, `role`, `status`, `timezone` |
 | `account.user` relation | `id`, `role`, `status` |
 
-The relation fields must be named `account` and `user`, because those are the names selected by the adapter. Prisma also requires the inverse relations; their field names (`sessions` and `accounts` above) can be changed because the adapter never queries them.
+The relations must be named `account` and `user`. Their inverse relation names may differ. Application models may add fields, indexes, defaults, and relations. Role and status fields may use Prisma enums.
 
-Application models may contain additional fields, defaults, indexes, and relations. `role` and `status` may use application-specific Prisma enums instead of `String`; Prisma returns both as strings to the adapter. For other database providers, replace the native `@db.*` annotations with compatible types and keep `agent` large enough to store the complete User-Agent.
+Keep `agent` large enough for the complete User-Agent. Use provider-compatible native annotations when the database is not MySQL/MariaDB.
 
-`config.table` is the Prisma client delegate name, not the physical database table name. For example, a Prisma model named `AdminSession` mapped with `@@map("account_sessions")` normally uses the `adminSession` delegate.
+`config.table` is a Prisma client delegate name. A model named `AdminSession` mapped with `@@map("account_sessions")` normally uses the `adminSession` delegate.
 
-Create migrations through the consuming application's normal Prisma workflow. The package never creates or runs migrations.
+Create and run migrations through the application's Prisma workflow. The package never manages migrations.
 
-## Hono quick start
+## Hono adapter
 
-The Hono adapter provides methods and middleware; it does not register routes automatically. The application remains responsible for creating its login, renewal, logout, and protected endpoints.
+### Request values
 
-### Create one auth instance
-
-```ts
-import { createHonoAuth } from "@gauts/auth/hono";
-import { createPrismaAdapter } from "@gauts/auth/prisma";
-
-export const auth = createHonoAuth({
-    secret: process.env.AUTH_SECRET,
-
-    db: createPrismaAdapter({
-        client: prisma,
-        config: {
-            account: {
-                status: ["ACTIVE", "PENDING"],
-            },
-            user: {
-                status: ["ACTIVE", "PENDING"],
-            },
-        },
-    }),
-
-    getIp: (c) => getTrustedClientIp(c),
-
-    session: {
-        validation: ["agent"],
-    },
-
-    cache: {
-        ttl: 60,
-    },
-});
-```
-
-`secret` is required only when `cache` is configured. Supply at least 32 high-entropy bytes from the API environment. It is never shared with the Next.js application.
-
-`createHonoAuth` is the normal Hono entry point: it creates the framework-independent core and attaches the Hono methods in one object. Use `createAuth` plus `createHonoAdapter` only when the same core instance must be composed manually:
-
-The resolved cookie names are exposed on the auth instance, including defaults:
+`auth.requireSession` sets fully typed values on the Hono context:
 
 ```ts
-auth.cookie.sessionName; // "__ses"
-auth.cookie.cacheName;   // "__cac"
-auth.cookie.renewName;   // "__ren"
-```
-
-```ts
-import { createAuth } from "@gauts/auth";
-import { createHonoAdapter } from "@gauts/auth/hono";
-
-const core = createAuth({ db });
-const hono = createHonoAdapter({
-    auth: core,
-    cache: { ttl: 60 },
-    getIp: (c) => getTrustedClientIp(c),
-    secret: process.env.AUTH_SECRET,
-});
-```
-
-Do not create a second core for the adapter; pass the existing `core` instance through `auth`.
-
-Only `account_id` is stored in the session row. The Prisma adapter loads the current `account` and `user` relations during authentication; no dynamic account data is copied into the session.
-
-### Type the application
-
-```ts
-import { Hono } from "hono";
-import type { HonoAuthEnv } from "@gauts/auth/hono";
-
-const app = new Hono<HonoAuthEnv>();
-```
-
-`auth.requireSession` installs:
-
-```ts
-const session = c.get("session");
 const account = c.get("account");
+const session = c.get("session");
 const user = c.get("user");
 ```
-
-The values have these shapes:
 
 ```ts
 type AuthAccount = {
@@ -282,99 +560,40 @@ type Session = {
 };
 ```
 
-### Login
+Only `account_id` is persisted in the session row. Current account and user data are loaded through the database relation and never copied into the table.
 
-The application owns input validation, credential lookup, rate limiting, and error responses. The adapter access rules validate current account and user status/role before the session is accepted.
+### Methods
+
+| Method | Purpose |
+| --- | --- |
+| `auth.createSession({ account_id, context })` | Creates the DB session and writes the browser cookies. |
+| `auth.resolveSession(context)` | Resolves a request and returns account, user, and session. |
+| `auth.renewSession(context)` | Performs DB validation, renews when due, and writes authoritative cookies. |
+| `auth.revokeSession(context)` | Revokes the current DB session and clears cookies. |
+| `auth.clearSession(context)` | Clears browser cookies without revoking the DB session. |
+| `auth.getToken(context)` | Returns the validated opaque token from the request cookie. |
+| `auth.requireSession` | Hono middleware that authenticates and populates the context. |
+
+`requireSession` authenticates only. Application-specific route permissions remain the application's responsibility.
+
+### Core and adapter composition
+
+`createHonoAuth()` is the normal entry point. Use separate composition only when the same core instance is required outside Hono:
 
 ```ts
-const DUMMY_PASSWORD_HASH =
-    "$argon2id$v=19$m=65536,p=4,t=3$PUotpfVXonc0VRFuV1pKZQ$oxxA8DMvGRTSbZvh2Dkokeyih9sbKeodWYROqVxP9BI";
+import { createAuth } from "@gauts/auth";
+import { createHonoAdapter } from "@gauts/auth/hono";
 
-app.post("/auth/login", async (c) => {
-    const body = await c.req.json<{
-        email: string;
-        password: string;
-    }>();
-    const account = await findAccount(body.email);
-    const passwordValid = await auth.password.verify({
-        password: body.password,
-        storedHash: account?.passwordHash ?? DUMMY_PASSWORD_HASH,
-    });
-
-    if (!account || !passwordValid) {
-        return c.json({ error: "Invalid credentials." }, 401);
-    }
-
-    await auth.createSession({
-        account_id: account.id,
-        context: c,
-    });
-
-    return c.json({ authenticated: true });
+const core = createAuth({ db });
+const hono = createHonoAdapter({
+    auth: core,
+    getIp: getTrustedClientIp,
 });
 ```
 
-The dummy hash ensures that unknown accounts still perform the configured password verification. Precompute it once with the same algorithm and cost as the application; never generate it inside the request handler. Keep the response identical for unknown accounts and invalid passwords.
+## Next.js adapter
 
-Only `account_id` is persisted by the session. Email, roles, statuses, password hashes, and other dynamic account data never enter the session table.
-
-### Protect routes
-
-```ts
-app.get("/account", auth.requireSession, (c) => {
-    return c.json({
-        account: c.get("account"),
-        session_id: c.get("session").id,
-        user: c.get("user"),
-    });
-});
-```
-
-`requireSession` authenticates the request. With cache configured, only `GET` and `HEAD` may use it. Every other method validates through the database and clears the short cache after successful validation. It does not apply application-specific route roles or permissions.
-
-### Renewal endpoint
-
-```ts
-app.post("/auth/renew", async (c) => {
-    await auth.renewSession(c);
-    return c.body(null, 204);
-});
-```
-
-`renewSession` always performs full database validation. It independently derives whether renewal is due from `created_at` and the last database renewal; the renewal marker never authorizes renewal.
-
-If renewal is not yet due, database expiry is not changed. The API still returns the authoritative session cookie, renewal marker, and cache.
-
-### Logout
-
-```ts
-app.post("/auth/logout", async (c) => {
-    await auth.revokeSession(c);
-    return c.body(null, 204);
-});
-```
-
-Logout marks the database session as revoked and then clears all three cookies. If database revocation fails, the cookies are not cleared and the error is propagated.
-
-## Next.js renewal adapter
-
-The Next.js adapter does not authenticate sessions. It calls the private API renewal URL when `renewAt` is missing, invalid, or due.
-
-```ts
-import { createNextAuth } from "@gauts/auth/next";
-
-export const nextAuth = createNextAuth({
-    renewUrl: `${process.env.NEXT_PRIVATE_API_URL}/auth/renew`,
-});
-```
-
-The controlled header list is also exported for application fetchers that need to follow the same forwarding policy:
-
-```ts
-import { FORWARD_HEADERS } from "@gauts/auth/next";
-```
-
-Use it in `proxy.ts` before returning the browser-facing response:
+The Next.js adapter schedules renewal; it does not authenticate pages or API requests.
 
 ```ts
 import type { NextRequest } from "next/server";
@@ -382,13 +601,10 @@ import { NextResponse } from "next/server";
 
 export const proxy = async (request: NextRequest) => {
     const response = NextResponse.next();
-    const renewal = await nextAuth.renew({
-        request,
-        response,
-    });
+    const renewal = await nextAuth.renew({ request, response });
 
     if (renewal.status === 401) {
-        return NextResponse.redirect(new URL("/login", request.url));
+        return NextResponse.redirect(new URL("/auth/login", request.url));
     }
 
     if (renewal.status !== null && renewal.status >= 500) {
@@ -399,252 +615,49 @@ export const proxy = async (request: NextRequest) => {
 };
 ```
 
-Result semantics:
+Result values:
 
 | `attempted` | `status` | Meaning |
-| --- | ---: | --- |
-| `false` | `null` | Session token exists and `renewAt` is a valid future timestamp. |
-| `false` | `401` | Session token is missing or malformed. No API call occurred. |
-| `true` | HTTP status | `/auth/renew` was called and its `Set-Cookie` headers were copied. |
+| :---: | ---: | --- |
+| `false` | `null` | Session token exists and renewal is not due. |
+| `false` | `401` | Session token is missing or malformed; no API request occurred. |
+| `true` | HTTP status | The renewal endpoint was called and returned this status. |
 
-The adapter forwards only the session cookie and the client/origin headers required for session, host, and CSRF validation. If `Origin` is missing and both `X-Forwarded-Proto` and `X-Forwarded-Host` were received, it reconstructs the public origin from those trusted proxy headers. It never derives public headers from the internal `NextRequest` URL. Other cookies, `Authorization`, and arbitrary request headers are never forwarded. Renewal rejects redirects and times out after five seconds. `renewUrl` must point to the application's trusted private API, and the deployment proxy must overwrite forwarded headers from untrusted clients.
+The adapter copies every returned `Set-Cookie` header to the browser response. It forwards only the session cookie and controlled client/origin headers required by the private API. Other cookies, authorization headers, and arbitrary headers are not forwarded.
 
-Protected API endpoints remain responsible for real authentication. The renewal marker is only a browser scheduling mechanism and never acts as a refresh token.
+`FORWARD_HEADERS` is exported from `@gauts/auth/next` for application fetchers that need the same controlled header list.
 
-Apply the proxy only to protected application routes, or skip renewal handling for public routes before calling `nextAuth.renew`. Otherwise a missing cookie produces `status: 401`, which is correct for protected routes but not for login or public pages.
+When `Origin` is absent and trusted `X-Forwarded-Proto` and `X-Forwarded-Host` headers exist, the adapter reconstructs the public origin from them. It never derives a public origin from the internal Next.js request URL. The deployment proxy must overwrite forwarded headers received from untrusted clients.
 
-## Configuration
+Apply renewal only to protected routes or skip public routes before calling `nextAuth.renew()`.
 
-### Password
-
-Argon2id is the default:
+## Core session API
 
 ```ts
-password: {
-    algorithm: "argon2id",
-}
+await auth.session.create({ account_id, client });
+await auth.session.resolve({ client, token });
+await auth.session.renew({ client, token });
+await auth.session.list(account_id);
+await auth.session.revoke({ account_id, session_id });
+await auth.session.revokeToken(token);
+await auth.session.revokeAccount(account_id);
 ```
 
-| Argon2id property | Default | Allowed |
-| --- | ---: | ---: |
-| `hashLength` | `32` | `16` to `64` |
-| `maxBytes` | `1024` | `1` to `1,048,576` |
-| `memoryCost` | `65,536` | `8,192` to `1,048,576` |
-| `parallelism` | `4` | `1` to `16` |
-| `timeCost` | `3` | `1` to `10` |
+| Method | Behavior |
+| --- | --- |
+| `create` | Creates a session and returns the raw token once. |
+| `resolve` | Performs read-only DB authentication. |
+| `renew` | Validates through DB and updates expiry only when due. |
+| `list` | Returns active sessions without token hashes. |
+| `revoke` | Revokes one session belonging to an account. |
+| `revokeToken` | Revokes the session matching a raw token. |
+| `revokeAccount` | Revokes every active session for an account. |
 
-Applications with existing bcrypt hashes must select bcrypt explicitly:
+The package does not limit session count or delete historical rows. Retention and cleanup belong to the application.
 
-```ts
-password: {
-    algorithm: "bcrypt",
-}
-```
+## Custom database adapter
 
-| bcrypt property | Default | Allowed |
-| --- | ---: | ---: |
-| `maxBytes` | `72` | `1` to `72` |
-| `rounds` | `12` | `4` to `31` |
-| `verifyMaxBytes` | `72` | `maxBytes` to `1,048,576` |
-
-The selected algorithm is used for both hashing and verification. The package never detects algorithms, migrates hashes, rehashes passwords, or falls back to another algorithm.
-
-### Session
-
-```ts
-session: {
-    maxLifetime: 30 * 24 * 60 * 60,
-    renewInterval: 24 * 60 * 60,
-    ttl: 7 * 24 * 60 * 60,
-    validation: ["agent"],
-}
-```
-
-Time values are seconds.
-
-| Property | Default | Allowed | Purpose |
-| --- | ---: | ---: | --- |
-| `maxLifetime` | `2,592,000` | `ttl` to `31,536,000` | Maximum lifetime from the original login, regardless of activity. |
-| `renewInterval` | `86,400` | `1` to `ttl - 1` | Minimum interval before renewal is due. |
-| `ttl` | `604,800` | `60` to `31,536,000` | Sliding inactivity lifetime. |
-| `validation` | `["agent"]` | Unique `agent`, `ip`, `platform` fields | Exact client fields compared on every validation. |
-
-The authoritative limits are derived from the immutable creation time and the last successful renewal:
-
-```text
-maxExpiresAt = created_at + maxLifetime
-expires_at   = min(now + ttl, maxExpiresAt)
-renew_at    = min((updated_at ?? created_at) + renewInterval, maxExpiresAt)
-```
-
-`maxLifetime` must be greater than or equal to `ttl`. It is enforced by the session core and requires a new login after the limit is reached; no additional database column is required.
-
-### Cookie
-
-```ts
-cookie: {
-    cacheName: "__cac",
-    domain: undefined,
-    path: "/",
-    renewName: "__ren",
-    sameSite: "Lax",
-    secure: true,
-    sessionName: "__ses",
-}
-```
-
-`HttpOnly` is always enabled.
-
-- The session cookie contains only the stable opaque token and expires with the database session.
-- The cache cookie contains the signed snapshot and expires after `cache.ttl`.
-- The renewal cookie contains the authoritative `renew_at` as Unix seconds and expires with the session cookie.
-- The renewal timestamp is an untrusted scheduling hint. It never authenticates or extends a session.
-- Cookie names default to `__ses`, `__cac`, and `__ren`.
-- All three names must be valid and unique.
-
-- `__Host-` requires `secure: true`, `path: "/"`, and no domain.
-- `__Secure-` requires `secure: true`.
-- `SameSite=None` requires `secure: true`.
-- Local HTTP development requires `secure: false`.
-
-### Signed session cache
-
-The cache is disabled by default. Enable it explicitly:
-
-```ts
-secret: process.env.AUTH_SECRET,
-cache: {
-    ttl: 60,
-}
-```
-
-`ttl` is measured in seconds and must be an integer from `1` through the configured session TTL. The secret must contain at least 32 bytes and should be generated from a cryptographically secure source.
-
-The cache payload:
-
-- is signed with HMAC-SHA-256 using a domain-separated context;
-- is cryptographically bound to the opaque session token;
-- contains the resolved session, account, user, and its own expiry;
-- compares the same configured IP, User-Agent, and platform fields on every hit;
-- never extends the authoritative session expiry;
-- is accepted only for `GET` and `HEAD` requests.
-
-The signed value uses a compact internal payload:
-
-```ts
-{
-    exp: cacheExpiresAt,
-    acc: {
-        id,
-        email,
-        name,
-        role,
-        status,
-        timezone,
-        usr: { id, role, status },
-    },
-    ses: {
-        id,
-        client: { ip, agent, platform },
-        created_at,
-        exp: expiresAt,
-        ren: renewAt,
-    },
-}
-```
-
-`account_id` is not duplicated in the cookie. After signature validation, the adapter rebuilds `session.account_id` from `acc.id`, so the public `session` object is unchanged. The cache is signed but not encrypted; never place passwords, hashes, raw session tokens, or application secrets in it.
-
-An absent, expired, malformed, altered, token-mismatched, or client-mismatched cache is a cache miss. The adapter then performs normal database authentication. A real configured client mismatch is therefore still detected and revoked by the database session service.
-
-Unsafe methods always query the database. Renewal and logout also query the database directly. `auth.session.resolve()` never uses the browser cache, which keeps WebSocket and non-HTTP integrations DB-backed.
-
-### Trusted client IP
-
-```ts
-getIp: (c) => getTrustedClientIp(c);
-```
-
-Only the application knows which proxy and forwarding header are trusted. The package normalizes the returned value but never chooses `X-Forwarded-For`, `CF-Connecting-IP`, or a socket address itself.
-
-The Hono adapter reads:
-
-```ts
-type SessionClientInput = {
-    agent?: string | null;
-    ip?: string | null;
-    platform?: string | null;
-};
-```
-
-- IPv4, IPv4-mapped IPv6, and IPv6 are canonicalized.
-- Invalid or empty IP values become `null`.
-- Platform comes from `Sec-CH-UA-Platform`, is normalized, and is limited to 255 characters.
-- User-Agent comes from `User-Agent` and is stored in full.
-- No GeoIP, DNS, country, or external lookup is performed.
-- Every field selected in `session.validation` is required during creation and validation. Missing or invalid configured fields never match.
-
-## Database adapter
-
-The core depends only on the exported `DbAdapter` contract. It does not import Prisma or depend on a specific ORM. `createPrismaAdapter` is the Prisma implementation exposed through `@gauts/auth/prisma`; other ORM implementations can use their own package subpath and factory name.
-
-Default Prisma delegate (`account_sessions`):
-
-```ts
-import { createPrismaAdapter } from "@gauts/auth/prisma";
-
-const db = createPrismaAdapter({
-    client: prisma,
-    config: {
-        account: {
-            status: ["ACTIVE"],
-        },
-        user: {
-            status: ["ACTIVE"],
-        },
-    },
-});
-```
-
-Custom compatible Prisma delegate:
-
-```ts
-const db = createPrismaAdapter({
-    client: prisma,
-    config: {
-        account: {
-            status: ["ACTIVE"],
-        },
-        table: "admin_sessions",
-        user: {
-            status: ["ACTIVE"],
-        },
-    },
-});
-```
-
-Access rules:
-
-```ts
-const db = createPrismaAdapter({
-    client: prisma,
-    config: {
-        account: {
-            status: ["ACTIVE", "PENDING"],
-        },
-        user: {
-            role: ["ADMIN"],
-            status: ["ACTIVE", "PENDING"],
-        },
-    },
-});
-```
-
-Account and user status lists are required because the package cannot know which application-specific values grant access. Roles are unrestricted unless configured. Every list must contain unique non-empty strings. A role rule controls authentication for the entire application; route-level authorization remains the application's responsibility.
-
-The configured arrays are access allowlists, not declarations of every enum value that exists in the application.
-
-Custom database adapters implement:
+The core depends on `DbAdapter`, not Prisma:
 
 ```ts
 import type { DbAdapter } from "@gauts/auth";
@@ -659,41 +672,17 @@ const db = {
 } satisfies DbAdapter;
 ```
 
-`findToken` must use the token hash and never accept or persist a raw token. It returns the current nested `account`, its `user`, and an `allowed` result derived from the adapter's access rules.
+`findToken` receives only the SHA-256 token hash. It must return the current nested account and user plus an `allowed` result. Raw tokens must never be persisted.
 
-## Core session API
+## Performance
 
-```ts
-await auth.session.create({ account_id, client });
-await auth.session.resolve({ client, token });
-await auth.session.renew({ client, token });
-await auth.session.list(account_id);
-await auth.session.revoke({ account_id, session_id });
-await auth.session.revokeToken(token);
-await auth.session.revokeAccount(account_id);
-```
+The package contains no Redis or in-process cache.
 
-- `resolve` performs read-only authentication.
-- `renew` validates and updates expiry only when due.
-- `list` returns active, non-expired sessions without token hashes.
-- revocation retains database history through `revoked_at`.
-- the package does not limit session count or delete historical rows; retention and cleanup belong to the application.
+Without the optional browser cache, each `requireSession` performs an indexed database lookup through `account_sessions.token_hash`.
 
-## Performance and cache policy
+With a valid cache, `GET` and `HEAD` skip the lookup until `cache.ttl` expires. Unsafe methods always use current database state.
 
-The package contains no Redis or in-process cache. The optional signed browser cache avoids shared infrastructure and works across API instances that use the same `AUTH_SECRET`.
-
-Without cache, each `requireSession` performs:
-
-```text
-1 Prisma relation lookup by indexed account_sessions.token_hash
-```
-
-With a valid cache, `GET` and `HEAD` avoid that lookup until `cache.ttl` expires. Cache misses perform the normal indexed lookup and return a new cache cookie. Prisma loads current relations through the session query; the exact number of SQL statements depends on Prisma's configured relation load strategy.
-
-Cookie caching has an explicit consistency tradeoff: revocation and account/user changes made elsewhere may remain visible to safe requests until the short cache expires. Unsafe methods never accept the cache, so writes observe current database state. A 60-second TTL limits the stale-read window to at most one minute.
-
-Logout clears the current browser's cache immediately. Cookies on another device cannot be remotely deleted, so immediate cross-device read revocation requires disabling the cache or using shared server-side state outside this package.
+The tradeoff is explicit: revocation and account/user changes made elsewhere may remain visible to safe cached requests until the short TTL expires. A 60-second TTL limits this stale-read window to one minute. Disable cache when immediate read revocation is required.
 
 ## Errors
 
@@ -710,31 +699,29 @@ type AuthErrorCode =
 
 Use `isAuthError(error)` before reading `error.code`.
 
-The package does not choose HTTP responses. A typical application mapping is:
+| Code | Suggested HTTP status | Meaning |
+| --- | ---: | --- |
+| `AUTH_CONFIG_INVALID` | `500` | Invalid startup configuration. |
+| `PASSWORD_INPUT_INVALID` | `400` | Password input violates configured limits. |
+| `SESSION_CLIENT_MISMATCH` | `403` | A configured client field does not match; the session is revoked. |
+| `SESSION_DATA_INVALID` | `400` | Invalid session or renewal data. |
+| `SESSION_INVALID` | `401` | Missing, expired, revoked, or unknown session. |
+| `SESSION_NOT_FOUND` | `404` | Requested session does not exist for the account. |
+| `DB_UNAVAILABLE` | `503` | Database operation failed. Authentication fails closed. |
 
-| Code | Suggested HTTP status |
-| --- | ---: |
-| `AUTH_CONFIG_INVALID` | `500` during startup |
-| `PASSWORD_INPUT_INVALID` | `400` |
-| `SESSION_CLIENT_MISMATCH` | `403` |
-| `SESSION_DATA_INVALID` | `400` |
-| `SESSION_INVALID` | `401` |
-| `SESSION_NOT_FOUND` | `404` |
-| `DB_UNAVAILABLE` | `503` |
-
-Applications may use a different response policy, but database failures and invalid sessions must continue to fail closed.
+The package throws typed errors but does not choose application HTTP responses.
 
 ## Security responsibilities
 
-The package provides session primitives, not a complete application security policy. Consuming applications remain responsible for:
+The package provides authentication primitives, not a complete application security policy. Applications remain responsible for:
 
 - TLS and trusted-proxy configuration;
-- CSRF, CORS, and origin validation;
+- CSRF, CORS, host, and origin validation;
 - login and renewal rate limiting;
 - equivalent password verification work for unknown accounts;
-- account status and authorization rules;
-- re-authentication for sensitive actions;
-- database migrations and cleanup;
+- route roles and authorization;
+- re-authentication for sensitive operations;
+- database migrations and session cleanup;
 - never logging passwords, raw tokens, cookie headers, or password hashes.
 
-Exact IP/User-Agent/platform matching is defense in depth. It does not prevent every stolen-cookie replay scenario.
+Exact IP, User-Agent, and platform validation are defense in depth. They do not prevent every stolen-cookie replay scenario.
