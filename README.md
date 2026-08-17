@@ -361,25 +361,25 @@ The cache is signed but not encrypted. Do not place passwords, password hashes, 
 ```ts
 const db = createPrismaAdapter({
     client: prisma,
-    config: {
-        session: {
-            table: "account_sessions",
-            relations: {
-                account: "account",
-                user: "user",
-            },
-        },
-        access: {
-            account: {
-                allowedRoles: ["OWNER", "ADMIN"],
-                allowedStatuses: ["ACTIVE"],
-            },
-            user: {
-                allowedRoles: ["ADMIN"],
-                allowedStatuses: ["ACTIVE"],
-            },
-        },
-    },
+    //  config: {
+    //     session: {
+    //         table: "account_sessions",
+    //         relations: {
+    //             account: "account",
+    //             user: "user",
+    //         },
+    //     },
+    //     access: {
+    //         account: {
+    //             allowedRoles: ["OWNER", "ADMIN"],
+    //             allowedStatuses: ["ACTIVE"],
+    //         },
+    //         user: {
+    //             allowedRoles: ["ADMIN"],
+    //             allowedStatuses: ["ACTIVE"],
+    //         },
+    //     },
+    // },
 });
 ```
 
