@@ -77,16 +77,6 @@ import { prisma } from "./db.js";
 export const auth = createHonoAuth({
     db: createPrismaAdapter({
         client: prisma,
-        config: {
-            access: {
-                account: {
-                    allowedStatuses: ["ACTIVE"],
-                },
-                user: {
-                    allowedStatuses: ["ACTIVE"],
-                },
-            },
-        },
     }),
 });
 ```
