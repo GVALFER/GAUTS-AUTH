@@ -207,6 +207,14 @@ export const auth = createHonoAuth({
 
 `createHonoAuth` is the normal Hono entry point: it creates the framework-independent core and attaches the Hono methods in one object. Use `createAuth` plus `createHonoAdapter` only when the same core instance must be composed manually:
 
+The resolved cookie names are exposed on the auth instance, including defaults:
+
+```ts
+auth.cookie.name;      // "__sec"
+auth.cookie.cacheName; // "__cac"
+auth.cookie.renewName; // "__ren"
+```
+
 ```ts
 import { createAuth } from "@gauts/auth";
 import { createHonoAdapter } from "@gauts/auth/hono";
@@ -399,7 +407,7 @@ Result semantics:
 | `false` | `401` | Session token is missing or malformed. No API call occurred. |
 | `true` | HTTP status | `/auth/renew` was called and its `Set-Cookie` headers were copied. |
 
-The adapter forwards only the session cookie and the client/origin headers required for session and CSRF validation. Other cookies, `Authorization`, and arbitrary request headers are never forwarded. Renewal rejects redirects and times out after five seconds. `renewUrl` must point to the application's trusted private API.
+The adapter forwards only the session cookie and the client/origin headers required for session and CSRF validation. If the browser request has no `Origin`, it uses the public origin from `NextRequest`. Other cookies, `Authorization`, and arbitrary request headers are never forwarded. Renewal rejects redirects and times out after five seconds. `renewUrl` must point to the application's trusted private API.
 
 Protected API endpoints remain responsible for real authentication. The renewal marker is only a browser scheduling mechanism and never acts as a refresh token.
 

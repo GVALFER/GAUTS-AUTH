@@ -104,6 +104,7 @@ describe("Next adapter", () => {
             assert.equal(headers.get("authorization"), null);
             assert.equal(headers.get("x-private-header"), null);
             assert.equal(headers.get("cf-connecting-ip"), "192.0.2.10");
+            assert.equal(headers.get("origin"), "https://admin.example.com");
             assert.equal(headers.get("user-agent"), "Next Test");
 
             const setCookies = (

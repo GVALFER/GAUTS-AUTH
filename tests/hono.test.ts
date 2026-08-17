@@ -162,6 +162,23 @@ const identityHeaders = {
 };
 
 describe("Hono adapter", () => {
+    it("exposes the resolved cookie names", () => {
+        const auth = createMockAuth(async () => resolved);
+        const defaults = createHonoAdapter({ auth, getIp: () => null });
+        const { adapter } = createApp({ auth });
+
+        assert.deepEqual(defaults.cookie, {
+            cacheName: "__cac",
+            name: "__sec",
+            renewName: "__ren",
+        });
+        assert.deepEqual(adapter.cookie, {
+            cacheName: "session-cache",
+            name: "session",
+            renewName: "session-renew",
+        });
+    });
+
     it("resolves through the database without cookie writes when cache is disabled", async () => {
         const { app } = createApp({
             auth: createMockAuth(async () => resolved),

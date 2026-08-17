@@ -11,6 +11,7 @@ import {
     parseSessionToken,
     RENEW_COOKIE_VALUE,
     resolveSessionCookieNames,
+    type SessionCookieNames,
 } from "../../session/cookie.js";
 
 export type HonoAuthVariables = {
@@ -81,6 +82,7 @@ type SetCacheInput = {
 
 export type HonoAdapter = {
     clearSession(c: Context): void;
+    cookie: Readonly<SessionCookieNames>;
     createSession(input: CreateSessionInput): Promise<Session>;
     getToken(c: Context): string | null;
     renewSession(c: Context): Promise<Session>;
@@ -358,6 +360,7 @@ export const createHonoAdapter = ({
 
     return {
         clearSession,
+        cookie: resolved.names,
         createSession,
         getToken,
         renewSession,

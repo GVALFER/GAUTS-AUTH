@@ -79,6 +79,10 @@ const getForwardHeaders = ({ name, request, token }: ForwardHeadersInput): Heade
         }
     }
 
+    if (!headers.has("origin")) {
+        headers.set("origin", request.nextUrl.origin);
+    }
+
     return headers;
 };
 
