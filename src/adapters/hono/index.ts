@@ -3,11 +3,14 @@ import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 import { createAuth, type Auth, type AuthDeps } from "../../auth.js";
 import type { SessionClientInput } from "../../client/index.js";
 import { createError, isAuthError } from "../../errors.js";
+import { createSessionCache, type SessionCacheConfig } from "../../session/cache.js";
 import type { AuthAccount, AuthUser, ResolvedSession, Session } from "../../session/types.js";
+
+export type { SessionCacheConfig } from "../../session/cache.js";
 import {
-    createSessionCookie,
-    parseSessionCookie,
-    resolveSessionCookieName,
+    parseSessionToken,
+    RENEW_COOKIE_VALUE,
+    resolveSessionCookieNames,
 } from "../../session/cookie.js";
 
 export type HonoAuthVariables = {
@@ -21,9 +24,11 @@ export type HonoAuthEnv = Env & {
 };
 
 export type HonoCookieConfig = {
+    cacheName?: string;
     domain?: string;
     name?: string;
     path?: string;
+    renewName?: string;
     sameSite?: "Strict" | "Lax" | "None";
     secure?: boolean;
 };
@@ -32,16 +37,30 @@ export type HonoGetIp = (
     c: Context,
 ) => Promise<string | null | undefined> | string | null | undefined;
 
+type HonoCacheOptions =
+    | {
+          cache: SessionCacheConfig;
+          secret: string;
+      }
+    | {
+          cache?: undefined;
+          secret?: string;
+      };
+
 export type HonoAdapterConfig = {
     auth: Auth;
+    cache?: SessionCacheConfig;
+    cookie?: HonoCookieConfig;
+    getIp: HonoGetIp;
+    secret?: string;
+};
+
+type HonoAuthBase = AuthDeps & {
     cookie?: HonoCookieConfig;
     getIp: HonoGetIp;
 };
 
-export type HonoAuthConfig = AuthDeps & {
-    cookie?: HonoCookieConfig;
-    getIp: HonoGetIp;
-};
+export type HonoAuthConfig = HonoAuthBase & HonoCacheOptions;
 
 type CreateSessionInput = {
     account_id: string;
@@ -51,6 +70,12 @@ type CreateSessionInput = {
 type SetSessionInput = {
     context: Context;
     session: Session;
+    token: string;
+};
+
+type SetCacheInput = {
+    context: Context;
+    resolved: ResolvedSession;
     token: string;
 };
 
@@ -67,7 +92,7 @@ export type HonoAdapter = {
 export type HonoAuth = Auth & HonoAdapter;
 
 const resolveCookie = (config: HonoCookieConfig = {}) => {
-    const name = resolveSessionCookieName(config.name);
+    const names = resolveSessionCookieNames(config);
     const path = config.path ?? "/";
     const sameSite = config.sameSite ?? "Lax";
     const secure = config.secure ?? true;
@@ -79,18 +104,20 @@ const resolveCookie = (config: HonoCookieConfig = {}) => {
         });
     }
 
-    if (name.startsWith("__Host-") && (!secure || path !== "/" || config.domain)) {
-        throw createError({
-            code: "AUTH_CONFIG_INVALID",
-            message: "__Host- cookies require secure=true, path=/, and no domain.",
-        });
-    }
+    for (const name of Object.values(names)) {
+        if (name.startsWith("__Host-") && (!secure || path !== "/" || config.domain)) {
+            throw createError({
+                code: "AUTH_CONFIG_INVALID",
+                message: "__Host- cookies require secure=true, path=/, and no domain.",
+            });
+        }
 
-    if (name.startsWith("__Secure-") && !secure) {
-        throw createError({
-            code: "AUTH_CONFIG_INVALID",
-            message: "__Secure- cookies require secure=true.",
-        });
+        if (name.startsWith("__Secure-") && !secure) {
+            throw createError({
+                code: "AUTH_CONFIG_INVALID",
+                message: "__Secure- cookies require secure=true.",
+            });
+        }
     }
 
     if (sameSite === "None" && !secure) {
@@ -101,7 +128,7 @@ const resolveCookie = (config: HonoCookieConfig = {}) => {
     }
 
     return {
-        name,
+        names,
         options: {
             ...(config.domain ? { domain: config.domain } : {}),
             httpOnly: true as const,
@@ -112,7 +139,15 @@ const resolveCookie = (config: HonoCookieConfig = {}) => {
     };
 };
 
-export const createHonoAdapter = ({ auth, cookie, getIp }: HonoAdapterConfig): HonoAdapter => {
+const canUseCache = (method: string): boolean => method === "GET" || method === "HEAD";
+
+export const createHonoAdapter = ({
+    auth,
+    cache,
+    cookie,
+    getIp,
+    secret,
+}: HonoAdapterConfig): HonoAdapter => {
     if (typeof getIp !== "function") {
         throw createError({
             code: "AUTH_CONFIG_INVALID",
@@ -121,6 +156,22 @@ export const createHonoAdapter = ({ auth, cookie, getIp }: HonoAdapterConfig): H
     }
 
     const resolved = resolveCookie(cookie);
+    let cacheService = null;
+
+    if (cache !== undefined) {
+        if (typeof secret !== "string") {
+            throw createError({
+                code: "AUTH_CONFIG_INVALID",
+                message: "Authentication secret is required when session cache is configured.",
+            });
+        }
+
+        cacheService = createSessionCache({
+            config: cache,
+            secret,
+            session: auth.config.session,
+        });
+    }
 
     const getSessionClient = async (c: Context): Promise<SessionClientInput> => ({
         agent: c.req.header("user-agent") ?? null,
@@ -128,25 +179,43 @@ export const createHonoAdapter = ({ auth, cookie, getIp }: HonoAdapterConfig): H
         platform: c.req.header("sec-ch-ua-platform") ?? null,
     });
 
-    const getCookieData = (c: Context) => {
-        return parseSessionCookie(getCookie(c, resolved.name));
-    };
-
     const getToken = (c: Context): string | null => {
-        return getCookieData(c)?.token ?? null;
+        return parseSessionToken(getCookie(c, resolved.names.name));
     };
 
-    const setSession = ({ context, session, token }: SetSessionInput): void => {
-        setCookie(
-            context,
-            resolved.name,
-            createSessionCookie({ renew_at: session.renew_at, token }),
-            { ...resolved.options, expires: session.expires_at },
-        );
+    const setSession = ({ context, session: value, token }: SetSessionInput): void => {
+        setCookie(context, resolved.names.name, token, {
+            ...resolved.options,
+            expires: value.expires_at,
+        });
+        setCookie(context, resolved.names.renewName, RENEW_COOKIE_VALUE, {
+            ...resolved.options,
+            expires: value.renew_at,
+        });
+    };
+
+    const setCache = ({ context, resolved: value, token }: SetCacheInput): void => {
+        if (!cacheService) {
+            return;
+        }
+
+        const cached = cacheService.create({ resolved: value, token });
+        setCookie(context, resolved.names.cacheName, cached.value, {
+            ...resolved.options,
+            expires: cached.expires_at,
+        });
+    };
+
+    const clearCache = (c: Context): void => {
+        if (cacheService) {
+            deleteCookie(c, resolved.names.cacheName, resolved.options);
+        }
     };
 
     const clearSession = (c: Context): void => {
-        deleteCookie(c, resolved.name, resolved.options);
+        deleteCookie(c, resolved.names.name, resolved.options);
+        deleteCookie(c, resolved.names.cacheName, resolved.options);
+        deleteCookie(c, resolved.names.renewName, resolved.options);
     };
 
     const requireToken = (c: Context): string => {
@@ -163,47 +232,81 @@ export const createHonoAdapter = ({ auth, cookie, getIp }: HonoAdapterConfig): H
         return token;
     };
 
-    const createSession = async ({ account_id, context }: CreateSessionInput): Promise<Session> => {
-        const created = await auth.session.create({
-            account_id,
-            client: await getSessionClient(context),
-        });
-
-        setSession({
-            context,
-            session: created.session,
-            token: created.token,
-        });
-
-        return created.session;
-    };
-
-    const resolveSession = async (c: Context): Promise<ResolvedSession> => {
-        const token = requireToken(c);
-        let resolvedSession;
+    const resolveDbSession = async ({
+        client,
+        context,
+        token,
+    }: {
+        client: SessionClientInput;
+        context: Context;
+        token: string;
+    }): Promise<ResolvedSession> => {
+        let value;
 
         try {
-            resolvedSession = await auth.session.resolve({
-                client: await getSessionClient(c),
-                token,
-            });
+            value = await auth.session.resolve({ client, token });
         } catch (error) {
             if (isAuthError(error) && error.code === "SESSION_CLIENT_MISMATCH") {
-                clearSession(c);
+                clearSession(context);
             }
 
             throw error;
         }
 
-        if (!resolvedSession) {
-            clearSession(c);
+        if (!value) {
+            clearSession(context);
             throw createError({
                 code: "SESSION_INVALID",
                 message: "Authentication required.",
             });
         }
 
-        return resolvedSession;
+        return value;
+    };
+
+    const createSession = async ({ account_id, context }: CreateSessionInput): Promise<Session> => {
+        const created = await auth.session.create({
+            account_id,
+            client: await getSessionClient(context),
+        });
+        const value: ResolvedSession = {
+            account: created.account,
+            session: created.session,
+            user: created.user,
+        };
+
+        setSession({ context, session: created.session, token: created.token });
+        setCache({ context, resolved: value, token: created.token });
+
+        return created.session;
+    };
+
+    const resolveSession = async (c: Context): Promise<ResolvedSession> => {
+        const token = requireToken(c);
+        const client = await getSessionClient(c);
+        const useCache = canUseCache(c.req.method);
+
+        if (cacheService && useCache) {
+            const cached = cacheService.resolve({
+                client,
+                token,
+                value: getCookie(c, resolved.names.cacheName),
+            });
+
+            if (cached) {
+                return cached;
+            }
+        }
+
+        const value = await resolveDbSession({ client, context: c, token });
+
+        if (cacheService && useCache) {
+            setCache({ context: c, resolved: value, token });
+        } else {
+            clearCache(c);
+        }
+
+        return value;
     };
 
     const renewSession = async (c: Context): Promise<Session> => {
@@ -232,15 +335,16 @@ export const createHonoAdapter = ({ auth, cookie, getIp }: HonoAdapterConfig): H
         }
 
         setSession({ context: c, session: renewed.session, token });
+        setCache({ context: c, resolved: renewed, token });
         return renewed.session;
     };
 
     const requireSession: MiddlewareHandler<HonoAuthEnv> = async (c, next) => {
-        const { account, session, user } = await resolveSession(c);
+        const value = await resolveSession(c);
 
-        c.set("session", session);
-        c.set("account", account);
-        c.set("user", user);
+        c.set("session", value.session);
+        c.set("account", value.account);
+        c.set("user", value.user);
         await next();
     };
 
@@ -264,10 +368,12 @@ export const createHonoAdapter = ({ auth, cookie, getIp }: HonoAdapterConfig): H
 };
 
 export const createHonoAuth = ({
+    cache,
     cookie,
     db,
     getIp,
     password,
+    secret,
     session,
 }: HonoAuthConfig): HonoAuth => {
     const auth = createAuth({
@@ -281,7 +387,9 @@ export const createHonoAuth = ({
         ...createHonoAdapter({
             auth,
             getIp,
+            ...(cache === undefined ? {} : { cache }),
             ...(cookie === undefined ? {} : { cookie }),
+            ...(secret === undefined ? {} : { secret }),
         }),
     };
 };

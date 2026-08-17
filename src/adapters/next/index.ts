@@ -1,9 +1,15 @@
 import type { NextRequest, NextResponse } from "next/server.js";
+
 import { createError } from "../../errors.js";
-import { parseSessionCookie, resolveSessionCookieName } from "../../session/cookie.js";
+import {
+    parseSessionToken,
+    RENEW_COOKIE_VALUE,
+    resolveSessionCookieNames,
+} from "../../session/cookie.js";
 
 export type NextCookieConfig = {
     name?: string;
+    renewName?: string;
 };
 
 export type NextAuthConfig = {
@@ -27,9 +33,9 @@ export type NextAuth = {
 };
 
 type ForwardHeadersInput = {
-    cookie: string;
     name: string;
     request: NextRequest;
+    token: string;
 };
 
 const RENEW_TIMEOUT = 5_000;
@@ -62,8 +68,8 @@ const getSetCookies = (headers: Headers): string[] => {
     return cookie ? [cookie] : [];
 };
 
-const getForwardHeaders = ({ cookie, name, request }: ForwardHeadersInput): Headers => {
-    const headers = new Headers({ cookie: `${name}=${cookie}` });
+const getForwardHeaders = ({ name, request, token }: ForwardHeadersInput): Headers => {
+    const headers = new Headers({ cookie: `${name}=${token}` });
 
     for (const header of FORWARD_HEADERS) {
         const value = request.headers.get(header);
@@ -77,7 +83,7 @@ const getForwardHeaders = ({ cookie, name, request }: ForwardHeadersInput): Head
 };
 
 export const createNextAuth = ({ cookie, renewUrl }: NextAuthConfig): NextAuth => {
-    const name = resolveSessionCookieName(cookie?.name);
+    const names = resolveSessionCookieNames(cookie);
     let url: URL;
 
     try {
@@ -99,10 +105,9 @@ export const createNextAuth = ({ cookie, renewUrl }: NextAuthConfig): NextAuth =
 
     return {
         renew: async ({ request, response }) => {
-            const cookieValue = request.cookies.get(name)?.value;
-            const session = parseSessionCookie(cookieValue);
+            const token = parseSessionToken(request.cookies.get(names.name)?.value);
 
-            if (!session || !cookieValue) {
+            if (!token) {
                 return {
                     attempted: false,
                     response,
@@ -110,7 +115,7 @@ export const createNextAuth = ({ cookie, renewUrl }: NextAuthConfig): NextAuth =
                 };
             }
 
-            if (session.renew_at.getTime() > Date.now()) {
+            if (request.cookies.get(names.renewName)?.value === RENEW_COOKIE_VALUE) {
                 return {
                     attempted: false,
                     response,
@@ -120,7 +125,7 @@ export const createNextAuth = ({ cookie, renewUrl }: NextAuthConfig): NextAuth =
 
             const renewal = await fetch(url.toString(), {
                 cache: "no-store",
-                headers: getForwardHeaders({ cookie: cookieValue, name, request }),
+                headers: getForwardHeaders({ name: names.name, request, token }),
                 method: "POST",
                 redirect: "error",
                 signal: AbortSignal.timeout(RENEW_TIMEOUT),

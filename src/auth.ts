@@ -1,4 +1,4 @@
-import type { PasswordConfig, SessionConfig } from "./config.js";
+import type { PasswordConfig, ResolvedSessionConfig, SessionConfig } from "./config.js";
 import { resolvePasswordConfig, resolveSessionConfig } from "./config.js";
 import { createError } from "./errors.js";
 import { createPassword, type PasswordService } from "./password/index.js";
@@ -15,6 +15,9 @@ export type AuthDeps = AuthConfig & {
 };
 
 export type Auth = {
+    readonly config: {
+        readonly session: Readonly<ResolvedSessionConfig>;
+    };
     password: PasswordService;
     session: SessionService;
 };
@@ -50,10 +53,15 @@ export const createAuth = ({ db, password, session }: AuthDeps): Auth => {
         value: db,
     });
 
+    const sessionConfig = resolveSessionConfig(session);
+
     return {
+        config: {
+            session: sessionConfig,
+        },
         password: createPassword(resolvePasswordConfig(password)),
         session: createSessionService({
-            config: resolveSessionConfig(session),
+            config: sessionConfig,
             db,
         }),
     };

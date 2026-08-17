@@ -129,6 +129,8 @@ describe("session service", () => {
         assert.equal(hashToken(created.token).length, 64);
         assert.equal(row?.token_hash, hashToken(created.token));
         assert.notEqual(row?.token_hash, created.token);
+        assert.equal(created.account, account);
+        assert.equal(created.user, account.user);
         assert.equal(created.session.account_id, account.id);
         assert.equal(row?.ip, "2001:db8::1");
         assert.equal(row?.agent, client.agent);
@@ -187,6 +189,8 @@ describe("session service", () => {
         });
 
         assert.equal(renewed?.renewed, true);
+        assert.equal(renewed?.account, account);
+        assert.equal(renewed?.user, account.user);
         assert.equal(harness.db.calls.updateExpiry, 1);
         assert.equal(
             renewed?.session.expires_at.toISOString(),

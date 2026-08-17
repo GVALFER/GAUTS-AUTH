@@ -2,30 +2,27 @@ import { Hono, type Context } from "hono";
 import { isAuthError, type DbAdapter } from "@gauts/auth";
 import { createHonoAuth, type HonoAuthEnv } from "@gauts/auth/hono";
 
-type Account = {
-    email: string;
+type LoginAccount = {
     id: string;
     passwordHash: string;
-    role: "OWNER" | "ADMIN" | "BILLING" | "SUPPORT" | "VIEWER";
-    user: {
-        id: string;
-        role: "ADMIN" | "CLIENT";
-    };
 };
 
 type ExampleDeps = {
     db: DbAdapter;
-    findAccount: (email: string) => Promise<Account | null>;
+    findAccount: (email: string) => Promise<LoginAccount | null>;
     getIp: (c: Context) => Promise<string | null | undefined> | string | null | undefined;
+    secret: string;
 };
 
 const DUMMY_PASSWORD_HASH =
     "$argon2id$v=19$m=65536,p=4,t=3$PUotpfVXonc0VRFuV1pKZQ$oxxA8DMvGRTSbZvh2Dkokeyih9sbKeodWYROqVxP9BI";
 
-export const createApp = ({ db, findAccount, getIp }: ExampleDeps) => {
+export const createApp = ({ db, findAccount, getIp, secret }: ExampleDeps) => {
     const auth = createHonoAuth({
+        cache: { ttl: 60 },
         db,
         getIp,
+        secret,
     });
 
     const app = new Hono<HonoAuthEnv>();
@@ -62,14 +59,7 @@ export const createApp = ({ db, findAccount, getIp }: ExampleDeps) => {
             context: c,
         });
 
-        return c.json({
-            account: {
-                email: account.email,
-                id: account.id,
-                role: account.role,
-            },
-            user: account.user,
-        });
+        return c.json({ authenticated: true });
     });
 
     app.post("/auth/logout", async (c) => {

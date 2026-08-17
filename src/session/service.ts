@@ -207,8 +207,10 @@ export const createSessionService = ({
             }
 
             return {
+                account: stored.account,
                 session: toSession(row),
                 token,
+                user: stored.account.user,
             };
         },
 
@@ -237,8 +239,10 @@ export const createSessionService = ({
 
             if (current.getTime() < getRenewAt(row.expires_at).getTime()) {
                 return {
+                    account: row.account,
                     renewed: false,
                     session: toSession(row),
+                    user: row.account.user,
                 };
             }
 
@@ -252,12 +256,14 @@ export const createSessionService = ({
             );
 
             return {
+                account: row.account,
                 renewed: true,
                 session: toSession({
                     ...row,
                     expires_at,
                     updated_at: current,
                 }),
+                user: row.account.user,
             };
         },
 

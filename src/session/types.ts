@@ -48,8 +48,10 @@ export type Session = {
 };
 
 export type CreatedSession = {
+    account: AuthAccount;
     session: Session;
     token: string;
+    user: AuthUser;
 };
 
 export type ResolvedSession = {
@@ -58,9 +60,8 @@ export type ResolvedSession = {
     user: AuthUser;
 };
 
-export type RenewedSession = {
+export type RenewedSession = ResolvedSession & {
     renewed: boolean;
-    session: Session;
 };
 
 export type CreateSession = {

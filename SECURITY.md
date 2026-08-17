@@ -6,8 +6,8 @@ Security fixes are provided for the latest published minor version.
 
 | Version | Supported |
 | --- | --- |
-| `0.2.x` | Yes |
-| `< 0.2` | No |
+| `0.3.x` | Yes |
+| `< 0.3` | No |
 
 ## Reporting a vulnerability
 
@@ -28,3 +28,13 @@ Reports are reviewed privately. A public advisory and patched release will be pr
 Security reports may cover the password service, session core, database adapters, framework adapters, published package contents, or dependency supply chain.
 
 Application-specific authorization, rate limiting, CSRF, CORS, proxy trust, deployment, and database access policies remain the consuming application's responsibility unless the vulnerability is caused by package behavior.
+
+## Signed session cache
+
+The optional browser cache is disabled when omitted. When configured, it is accepted only for `GET` and `HEAD` requests and is signed with HMAC-SHA-256 using an application-provided secret of at least 32 bytes.
+
+The cache is bound to the opaque session token, its own expiry, the authoritative session expiry, and the configured client fields. Invalid cache data never authenticates a request; it causes normal database validation.
+
+Cookie caching introduces a bounded consistency window. A session revoked on another device, or account/user access changed in the database, may remain readable until the cache TTL expires. Unsafe methods, renewal, logout, WebSockets, and direct core calls always validate through the database. Applications requiring immediate cross-device read revocation must leave the cache disabled or provide shared server-side enforcement outside this package.
+
+Keep `AUTH_SECRET` in the API environment. Do not expose it to browser code or share it with a frontend merely to inspect the renewal marker. The marker is intentionally untrusted and never authenticates or renews a session by itself.

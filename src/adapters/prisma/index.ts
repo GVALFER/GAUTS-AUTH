@@ -1,11 +1,6 @@
 import { createError } from "../../errors.js";
-import type {
-    AuthAccount,
-    AuthSessionRecord,
-    AuthUser,
-    DbAdapter,
-    SessionRecord,
-} from "../../session/types.js";
+import { isAuthAccount, isNullableString, isRecord } from "../../session/guards.js";
+import type { AuthSessionRecord, DbAdapter, SessionRecord } from "../../session/types.js";
 
 const DEFAULT_TABLE = "account_sessions";
 
@@ -120,14 +115,6 @@ const authSelect = {
     },
 } as const;
 
-const isRecord = (value: unknown): value is Record<string, unknown> => {
-    return typeof value === "object" && value !== null && !Array.isArray(value);
-};
-
-const isNullableString = (value: unknown): value is string | null => {
-    return typeof value === "string" || value === null;
-};
-
 const isNullableDate = (value: unknown): value is Date | null => {
     return value instanceof Date || value === null;
 };
@@ -136,28 +123,6 @@ const isStringArray = (value: unknown): value is string[] => {
     return (
         Array.isArray(value) &&
         value.every((item: unknown) => typeof item === "string" && item.length > 0)
-    );
-};
-
-const isAuthUser = (value: unknown): value is AuthUser => {
-    return (
-        isRecord(value) &&
-        typeof value.id === "string" &&
-        typeof value.role === "string" &&
-        typeof value.status === "string"
-    );
-};
-
-const isAuthAccount = (value: unknown): value is AuthAccount => {
-    return (
-        isRecord(value) &&
-        typeof value.email === "string" &&
-        typeof value.id === "string" &&
-        typeof value.name === "string" &&
-        typeof value.role === "string" &&
-        typeof value.status === "string" &&
-        isNullableString(value.timezone) &&
-        isAuthUser(value.user)
     );
 };
 
@@ -190,11 +155,7 @@ const isSessionRecord = (value: unknown): value is SessionRecord => {
 };
 
 const resolveValues = ({ input, name }: ResolveValuesInput): readonly string[] => {
-    if (
-        !isStringArray(input) ||
-        input.length === 0 ||
-        new Set(input).size !== input.length
-    ) {
+    if (!isStringArray(input) || input.length === 0 || new Set(input).size !== input.length) {
         throw createError({
             code: "AUTH_CONFIG_INVALID",
             message: `${name} must contain unique non-empty strings.`,

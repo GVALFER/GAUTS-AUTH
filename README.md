@@ -2,13 +2,15 @@
 
 Reusable password authentication and database-backed opaque sessions for Node.js applications.
 
-The package stores only a SHA-256 token hash in the database. The browser receives one HttpOnly cookie formatted as:
+The package stores only a SHA-256 token hash in the database. Browser integration uses three cookies with separate responsibilities:
 
 ```text
-<opaque-token>.<renewAt>
+session cookie -> opaque token
+cache cookie   -> short signed session snapshot
+renew cookie   -> untrusted renewal marker
 ```
 
-The opaque token remains stable. `renewAt` is an untrusted scheduling hint used by the Next.js adapter; the API always validates and renews against the database.
+Only the opaque session token authenticates. It remains stable during sliding renewal. The optional cache is disabled when omitted and never replaces database validation for unsafe methods, renewal, logout, WebSockets, or direct core calls.
 
 ## Requirements
 
@@ -52,34 +54,43 @@ credentials accepted
     -> store SHA-256 token hash in DB
     -> load current account and user relations
     -> validate configured status and role rules
-    -> write token.renewAt HttpOnly cookie
+    -> write opaque session token cookie
+    -> write 24-hour renewal marker
+    -> optionally write signed short cache
 ```
 
-Protected request:
+Protected `GET` or `HEAD`:
 
 ```text
-cookie token.renewAt
-    -> extract token
+opaque session token
+    -> valid signed cache bound to token and client?
+        -> yes: expose cached session, account, and user
+        -> no: perform indexed DB validation and issue a fresh cache
+```
+
+Unsafe methods and direct core calls:
+
+```text
+opaque session token
     -> SHA-256 token
     -> indexed DB lookup
-    -> expiry, revocation, and client validation
-    -> load current account and user relations
-    -> validate configured status and role rules
-    -> expose session, account, and user
+    -> expiry, revocation, account, user, and client validation
+    -> clear any existing cache after successful unsafe validation
     -> route
 ```
 
 Renewal:
 
 ```text
-Next reads renewAt
-    -> POST /auth/renew when due
+Next checks the renewal marker
+    -> marker exists: no API call
+    -> marker missing: POST /auth/renew
     -> API performs full DB validation
     -> DB expires_at = now + ttl
-    -> Set-Cookie with same token, new renewAt, and new Expires
+    -> Set-Cookie with same token, a new marker, and a fresh cache
 ```
 
-`resolve` and `requireSession` are read-only. Only the explicit renewal operation updates expiry or emits a renewal cookie.
+`auth.session.resolve()` is always DB-backed and read-only. Only the explicit renewal operation updates database expiry.
 
 ## Prisma schema contract
 
@@ -166,6 +177,8 @@ import { createHonoAuth } from "@gauts/auth/hono";
 import { createPrismaAdapter } from "@gauts/auth/prisma";
 
 export const auth = createHonoAuth({
+    secret: process.env.AUTH_SECRET,
+
     db: createPrismaAdapter({
         client: prisma,
         config: {
@@ -184,11 +197,13 @@ export const auth = createHonoAuth({
         validation: ["agent"],
     },
 
-    cookie: {
-        name: "__Host-session",
+    cache: {
+        ttl: 60,
     },
 });
 ```
+
+`secret` is required only when `cache` is configured. Supply at least 32 high-entropy bytes from the API environment. It is never shared with the Next.js application.
 
 `createHonoAuth` is the normal Hono entry point: it creates the framework-independent core and attaches the Hono methods in one object. Use `createAuth` plus `createHonoAdapter` only when the same core instance must be composed manually:
 
@@ -199,7 +214,9 @@ import { createHonoAdapter } from "@gauts/auth/hono";
 const core = createAuth({ db });
 const hono = createHonoAdapter({
     auth: core,
+    cache: { ttl: 60 },
     getIp: (c) => getTrustedClientIp(c),
+    secret: process.env.AUTH_SECRET,
 });
 ```
 
@@ -280,19 +297,12 @@ app.post("/auth/login", async (c) => {
         return c.json({ error: "Invalid credentials." }, 401);
     }
 
-    const session = await auth.createSession({
+    await auth.createSession({
         account_id: account.id,
         context: c,
     });
 
-    return c.json({
-        account: {
-            id: session.account_id,
-            email: account.email,
-            role: account.role,
-        },
-        user: account.user,
-    });
+    return c.json({ authenticated: true });
 });
 ```
 
@@ -312,7 +322,7 @@ app.get("/account", auth.requireSession, (c) => {
 });
 ```
 
-`requireSession` authenticates the request. It does not apply application-specific roles or permissions.
+`requireSession` authenticates the request. With cache configured, only `GET` and `HEAD` may use it. Every other method validates through the database and clears the short cache after successful validation. It does not apply application-specific route roles or permissions.
 
 ### Renewal endpoint
 
@@ -323,9 +333,9 @@ app.post("/auth/renew", async (c) => {
 });
 ```
 
-`renewSession` always performs full session validation. It independently derives whether renewal is due from the database `expires_at`; the cookie timestamp never authorizes renewal.
+`renewSession` always performs full database validation. It independently derives whether renewal is due from the database `expires_at`; the renewal marker never authorizes renewal.
 
-If renewal is not yet due, the session expiry is not changed. The API still returns the authoritative cookie value so a stale or altered hint can be corrected.
+If renewal is not yet due, database expiry is not changed. The API still returns the authoritative session cookie, renewal marker, and cache.
 
 ### Logout
 
@@ -336,19 +346,16 @@ app.post("/auth/logout", async (c) => {
 });
 ```
 
-Logout marks the database session as revoked and then clears the cookie. If database revocation fails, the cookie is not cleared and the error is propagated.
+Logout marks the database session as revoked and then clears all three cookies. If database revocation fails, the cookies are not cleared and the error is propagated.
 
 ## Next.js renewal adapter
 
-The Next.js adapter does not authenticate sessions. It reads the `renewAt` hint and calls the private API renewal URL only when due.
+The Next.js adapter does not authenticate sessions. It calls the private API renewal URL only when the renewal marker is missing.
 
 ```ts
 import { createNextAuth } from "@gauts/auth/next";
 
 export const nextAuth = createNextAuth({
-    cookie: {
-        name: "__Host-session",
-    },
     renewUrl: `${process.env.NEXT_PRIVATE_API_URL}/auth/renew`,
 });
 ```
@@ -388,13 +395,13 @@ Result semantics:
 
 | `attempted` | `status` | Meaning |
 | --- | ---: | --- |
-| `false` | `null` | Cookie is well formed and renewal is not due. |
-| `false` | `401` | Cookie is missing or malformed. No API call occurred. |
+| `false` | `null` | Session token and renewal marker exist. |
+| `false` | `401` | Session token is missing or malformed. No API call occurred. |
 | `true` | HTTP status | `/auth/renew` was called and its `Set-Cookie` headers were copied. |
 
 The adapter forwards only the session cookie and the client/origin headers required for session and CSRF validation. Other cookies, `Authorization`, and arbitrary request headers are never forwarded. Renewal rejects redirects and times out after five seconds. `renewUrl` must point to the application's trusted private API.
 
-Protected API endpoints remain responsible for real authentication. A well-formed cookie can still reference an expired or revoked database session.
+Protected API endpoints remain responsible for real authentication. The renewal marker is only a browser scheduling mechanism and never acts as a refresh token.
 
 Apply the proxy only to protected application routes, or skip renewal handling for public routes before calling `nextAuth.renew`. Otherwise a missing cookie produces `status: 401`, which is correct for protected routes but not for login or public pages.
 
@@ -462,9 +469,11 @@ renewAt = expires_at - (ttl - renewInterval)
 
 ```ts
 cookie: {
+    cacheName: "__cac",
     domain: undefined,
-    name: "__Host-session",
+    name: "__sec",
     path: "/",
+    renewName: "__ren",
     sameSite: "Lax",
     secure: true,
 }
@@ -472,10 +481,42 @@ cookie: {
 
 `HttpOnly` is always enabled.
 
+- The session cookie contains only the stable opaque token and expires with the database session.
+- The cache cookie contains the signed snapshot and expires after `cache.ttl`.
+- The renewal cookie contains the fixed value `1` and expires at the authoritative `renew_at` time.
+- Cookie names default to `__sec`, `__cac`, and `__ren`.
+- All three names must be valid and unique.
+
 - `__Host-` requires `secure: true`, `path: "/"`, and no domain.
 - `__Secure-` requires `secure: true`.
 - `SameSite=None` requires `secure: true`.
-- Local HTTP development requires `secure: false` and a custom name without a secure prefix.
+- Local HTTP development requires `secure: false`.
+
+### Signed session cache
+
+The cache is disabled by default. Enable it explicitly:
+
+```ts
+secret: process.env.AUTH_SECRET,
+cache: {
+    ttl: 60,
+}
+```
+
+`ttl` is measured in seconds and must be an integer from `1` through the configured session TTL. The secret must contain at least 32 bytes and should be generated from a cryptographically secure source.
+
+The cache payload:
+
+- is signed with HMAC-SHA-256 using a domain-separated context;
+- is cryptographically bound to the opaque session token;
+- contains the resolved session, account, user, and its own expiry;
+- compares the same configured IP, User-Agent, and platform fields on every hit;
+- never extends the authoritative session expiry;
+- is accepted only for `GET` and `HEAD` requests.
+
+An absent, expired, malformed, altered, token-mismatched, or client-mismatched cache is a cache miss. The adapter then performs normal database authentication. A real configured client mismatch is therefore still detected and revoked by the database session service.
+
+Unsafe methods always query the database. Renewal and logout also query the database directly. `auth.session.resolve()` never uses the browser cache, which keeps WebSocket and non-HTTP integrations DB-backed.
 
 ### Trusted client IP
 
@@ -599,17 +640,19 @@ await auth.session.revokeAccount(account_id);
 
 ## Performance and cache policy
 
-This version intentionally has no Redis or in-process cache.
+The package contains no Redis or in-process cache. The optional signed browser cache avoids shared infrastructure and works across API instances that use the same `AUTH_SECRET`.
 
-Each `requireSession` performs:
+Without cache, each `requireSession` performs:
 
 ```text
 1 Prisma relation lookup by indexed account_sessions.token_hash
 ```
 
-There is no account callback or second application-level lookup. Prisma loads the current relations through the session query; the exact number of SQL statements depends on Prisma's configured relation load strategy. Add no cache until measured load demonstrates a need and its revocation consistency trade-off is explicitly accepted.
+With a valid cache, `GET` and `HEAD` avoid that lookup until `cache.ttl` expires. Cache misses perform the normal indexed lookup and return a new cache cookie. Prisma loads current relations through the session query; the exact number of SQL statements depends on Prisma's configured relation load strategy.
 
-Email, roles, and statuses come from the current account/user relations. The package never uses stale session snapshots for authorization.
+Cookie caching has an explicit consistency tradeoff: revocation and account/user changes made elsewhere may remain visible to safe requests until the short cache expires. Unsafe methods never accept the cache, so writes observe current database state. A 60-second TTL limits the stale-read window to at most one minute.
+
+Logout clears the current browser's cache immediately. Cookies on another device cannot be remotely deleted, so immediate cross-device read revocation requires disabling the cache or using shared server-side state outside this package.
 
 ## Errors
 

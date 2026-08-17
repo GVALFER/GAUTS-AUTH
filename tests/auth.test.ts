@@ -25,8 +25,10 @@ describe("auth configuration", () => {
 
     it("creates one Hono auth instance with core and HTTP methods", () => {
         const auth = createHonoAuth({
+            cache: { ttl: 60 },
             db,
             getIp: () => null,
+            secret: "s".repeat(32),
         });
 
         assert.equal(auth.password.algorithm, "argon2id");
