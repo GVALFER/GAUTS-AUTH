@@ -1,7 +1,13 @@
 import { createError } from "../../errors.js";
-import type { DbAdapter, SessionRecord } from "../../session/types.js";
+import type {
+    AuthAccount,
+    AuthSessionRecord,
+    AuthUser,
+    DbAdapter,
+    SessionRecord,
+} from "../../session/types.js";
 
-const DEFAULT_TABLE = "auth_sessions";
+const DEFAULT_TABLE = "account_sessions";
 
 type DelegateMeta<T> = T[Extract<keyof T, symbol>];
 
@@ -25,13 +31,23 @@ export type PrismaSessionTable<Client> = {
 }[keyof Client] &
     string;
 
-export type PrismaAdapterConfig<Client> = {
+export type PrismaAccessConfig = {
+    role?: readonly string[];
+    status: readonly string[];
+};
+
+type PrismaAuthConfig = {
+    account: PrismaAccessConfig;
+    user: PrismaAccessConfig;
+};
+
+export type PrismaAdapterConfig<Client> = PrismaAuthConfig & {
     table?: PrismaSessionTable<Client>;
 };
 
 type DefaultPrismaAdapterInput<Client extends object> = {
     client: Client;
-    config?: PrismaAdapterConfig<Client>;
+    config: PrismaAdapterConfig<Client>;
 };
 
 type CustomPrismaAdapterInput<Client extends object> = {
@@ -50,8 +66,24 @@ type Delegate = {
     create(args: unknown): Promise<unknown>;
     findFirst(args: unknown): Promise<unknown>;
     findMany(args: unknown): Promise<unknown>;
+    findUnique(args: unknown): Promise<unknown>;
     update(args: unknown): Promise<unknown>;
     updateMany(args: unknown): Promise<unknown>;
+};
+
+type ResolvedAccess = {
+    role: readonly string[] | null;
+    status: readonly string[];
+};
+
+type AccessRules = {
+    account: ResolvedAccess;
+    user: ResolvedAccess;
+};
+
+type ResolveValuesInput = {
+    input: unknown;
+    name: string;
 };
 
 const select = {
@@ -67,6 +99,27 @@ const select = {
     updated_at: true,
 } as const;
 
+const authSelect = {
+    ...select,
+    account: {
+        select: {
+            email: true,
+            id: true,
+            name: true,
+            role: true,
+            status: true,
+            timezone: true,
+            user: {
+                select: {
+                    id: true,
+                    role: true,
+                    status: true,
+                },
+            },
+        },
+    },
+} as const;
+
 const isRecord = (value: unknown): value is Record<string, unknown> => {
     return typeof value === "object" && value !== null && !Array.isArray(value);
 };
@@ -79,12 +132,42 @@ const isNullableDate = (value: unknown): value is Date | null => {
     return value instanceof Date || value === null;
 };
 
+const isStringArray = (value: unknown): value is string[] => {
+    return (
+        Array.isArray(value) &&
+        value.every((item: unknown) => typeof item === "string" && item.length > 0)
+    );
+};
+
+const isAuthUser = (value: unknown): value is AuthUser => {
+    return (
+        isRecord(value) &&
+        typeof value.id === "string" &&
+        typeof value.role === "string" &&
+        typeof value.status === "string"
+    );
+};
+
+const isAuthAccount = (value: unknown): value is AuthAccount => {
+    return (
+        isRecord(value) &&
+        typeof value.email === "string" &&
+        typeof value.id === "string" &&
+        typeof value.name === "string" &&
+        typeof value.role === "string" &&
+        typeof value.status === "string" &&
+        isNullableString(value.timezone) &&
+        isAuthUser(value.user)
+    );
+};
+
 const isDelegate = (value: unknown): value is Delegate => {
     return (
         isRecord(value) &&
         typeof value.create === "function" &&
         typeof value.findFirst === "function" &&
         typeof value.findMany === "function" &&
+        typeof value.findUnique === "function" &&
         typeof value.update === "function" &&
         typeof value.updateMany === "function"
     );
@@ -106,6 +189,66 @@ const isSessionRecord = (value: unknown): value is SessionRecord => {
     );
 };
 
+const resolveValues = ({ input, name }: ResolveValuesInput): readonly string[] => {
+    if (
+        !isStringArray(input) ||
+        input.length === 0 ||
+        new Set(input).size !== input.length
+    ) {
+        throw createError({
+            code: "AUTH_CONFIG_INVALID",
+            message: `${name} must contain unique non-empty strings.`,
+        });
+    }
+
+    return input;
+};
+
+const resolveAccess = (config: unknown): AccessRules => {
+    if (!isRecord(config) || !isRecord(config.account) || !isRecord(config.user)) {
+        throw createError({
+            code: "AUTH_CONFIG_INVALID",
+            message: "Prisma account and user access rules are required.",
+        });
+    }
+
+    return {
+        account: {
+            role:
+                config.account.role === undefined
+                    ? null
+                    : resolveValues({ input: config.account.role, name: "account.role" }),
+            status: resolveValues({ input: config.account.status, name: "account.status" }),
+        },
+        user: {
+            role:
+                config.user.role === undefined
+                    ? null
+                    : resolveValues({ input: config.user.role, name: "user.role" }),
+            status: resolveValues({ input: config.user.status, name: "user.status" }),
+        },
+    };
+};
+
+const resolveTable = (config: unknown): string => {
+    if (!isRecord(config) || config.table === undefined) {
+        return DEFAULT_TABLE;
+    }
+
+    if (typeof config.table !== "string" || !config.table) {
+        throw createError({
+            code: "AUTH_CONFIG_INVALID",
+            message: "Prisma session table name is invalid.",
+        });
+    }
+
+    return config.table;
+};
+
+const matchesAccess = (value: { role: string; status: string }, rule: ResolvedAccess) => {
+    return rule.status.includes(value.status) && (!rule.role || rule.role.includes(value.role));
+};
+
 const requireRow = (value: unknown): SessionRecord => {
     if (!isSessionRecord(value)) {
         throw new Error("Prisma session table returned invalid data.");
@@ -122,12 +265,29 @@ const requireRows = (value: unknown): SessionRecord[] => {
     return value.map(requireRow);
 };
 
-export const createDbAdapter = <Client extends object>(
+const requireAuthRow = (value: unknown, access: AccessRules): AuthSessionRecord => {
+    const row = requireRow(value);
+
+    if (!isRecord(value) || !isAuthAccount(value.account)) {
+        throw new Error("Prisma account relation returned invalid data.");
+    }
+
+    return {
+        ...row,
+        account: value.account,
+        allowed:
+            matchesAccess(value.account, access.account) &&
+            matchesAccess(value.account.user, access.user),
+    };
+};
+
+export const createPrismaAdapter = <Client extends object>(
     input: PrismaAdapterInput<Client>,
 ): DbAdapter => {
-    const config = "config" in input ? input.config : undefined;
-    const table_name = config?.table ?? DEFAULT_TABLE;
+    const config: unknown = input.config;
+    const table_name = resolveTable(config);
     const table = isRecord(input.client) ? input.client[table_name] : undefined;
+    const access = resolveAccess(config);
 
     if (!isDelegate(table)) {
         throw createError({
@@ -165,6 +325,15 @@ export const createDbAdapter = <Client extends object>(
             });
 
             return requireRows(rows);
+        },
+
+        findToken: async (token_hash) => {
+            const row = await table.findUnique({
+                select: authSelect,
+                where: { token_hash },
+            });
+
+            return row === null ? null : requireAuthRow(row, access);
         },
 
         revoke: async ({ revoked_at, session_ids }) => {

@@ -3,15 +3,21 @@ import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 import { createAuth, type Auth, type AuthDeps } from "../../auth.js";
 import type { SessionClientInput } from "../../client/index.js";
 import { createError, isAuthError } from "../../errors.js";
-import type { Session } from "../../session/types.js";
+import type { AuthAccount, AuthUser, ResolvedSession, Session } from "../../session/types.js";
+import {
+    createSessionCookie,
+    parseSessionCookie,
+    resolveSessionCookieName,
+} from "../../session/cookie.js";
 
-export type HonoAuthVariables<TData extends object> = {
-    account: TData;
-    session: Session<TData>;
+export type HonoAuthVariables = {
+    account: AuthAccount;
+    session: Session;
+    user: AuthUser;
 };
 
-export type HonoAuthEnv<TData extends object> = Env & {
-    Variables: HonoAuthVariables<TData>;
+export type HonoAuthEnv = Env & {
+    Variables: HonoAuthVariables;
 };
 
 export type HonoCookieConfig = {
@@ -26,8 +32,8 @@ export type HonoGetIp = (
     c: Context,
 ) => Promise<string | null | undefined> | string | null | undefined;
 
-export type HonoAdapterConfig<TData extends object> = {
-    auth: Auth<TData>;
+export type HonoAdapterConfig = {
+    auth: Auth;
     cookie?: HonoCookieConfig;
     getIp: HonoGetIp;
 };
@@ -37,37 +43,34 @@ export type HonoAuthConfig = AuthDeps & {
     getIp: HonoGetIp;
 };
 
-type CreateSessionInput<TData extends object> = {
+type CreateSessionInput = {
     account_id: string;
     context: Context;
-    data: TData;
 };
 
-export type HonoAdapter<TData extends object> = {
+type SetSessionInput = {
+    context: Context;
+    session: Session;
+    token: string;
+};
+
+export type HonoAdapter = {
     clearSession(c: Context): void;
-    createSession(input: CreateSessionInput<TData>): Promise<Session<TData>>;
+    createSession(input: CreateSessionInput): Promise<Session>;
     getToken(c: Context): string | null;
-    requireSession: MiddlewareHandler<HonoAuthEnv<TData>>;
-    resolveSession(c: Context): Promise<Session<TData>>;
+    renewSession(c: Context): Promise<Session>;
+    requireSession: MiddlewareHandler<HonoAuthEnv>;
+    resolveSession(c: Context): Promise<ResolvedSession>;
     revokeSession(c: Context): Promise<string[]>;
 };
 
-export type HonoAuth<TData extends object> = Auth<TData> & HonoAdapter<TData>;
-
-const COOKIE_NAME_PATTERN = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
+export type HonoAuth = Auth & HonoAdapter;
 
 const resolveCookie = (config: HonoCookieConfig = {}) => {
-    const name = config.name ?? "__Host-session";
+    const name = resolveSessionCookieName(config.name);
     const path = config.path ?? "/";
     const sameSite = config.sameSite ?? "Lax";
     const secure = config.secure ?? true;
-
-    if (!COOKIE_NAME_PATTERN.test(name)) {
-        throw createError({
-            code: "AUTH_CONFIG_INVALID",
-            message: "Session cookie name is invalid.",
-        });
-    }
 
     if (!path.startsWith("/")) {
         throw createError({
@@ -109,11 +112,7 @@ const resolveCookie = (config: HonoCookieConfig = {}) => {
     };
 };
 
-export const createHonoAdapter = <TData extends object>({
-    auth,
-    cookie,
-    getIp,
-}: HonoAdapterConfig<TData>): HonoAdapter<TData> => {
+export const createHonoAdapter = ({ auth, cookie, getIp }: HonoAdapterConfig): HonoAdapter => {
     if (typeof getIp !== "function") {
         throw createError({
             code: "AUTH_CONFIG_INVALID",
@@ -129,60 +128,58 @@ export const createHonoAdapter = <TData extends object>({
         platform: c.req.header("sec-ch-ua-platform") ?? null,
     });
 
-    const getToken = (c: Context): string | null => {
-        const token = getCookie(c, resolved.name)?.trim();
-        return token?.length ? token : null;
+    const getCookieData = (c: Context) => {
+        return parseSessionCookie(getCookie(c, resolved.name));
     };
 
-    const setToken = ({
-        context,
-        expires_at,
-        token,
-    }: {
-        context: Context;
-        expires_at: Date;
-        token: string;
-    }): void => {
-        setCookie(context, resolved.name, token, {
-            ...resolved.options,
-            expires: expires_at,
-        });
+    const getToken = (c: Context): string | null => {
+        return getCookieData(c)?.token ?? null;
+    };
+
+    const setSession = ({ context, session, token }: SetSessionInput): void => {
+        setCookie(
+            context,
+            resolved.name,
+            createSessionCookie({ renew_at: session.renew_at, token }),
+            { ...resolved.options, expires: session.expires_at },
+        );
     };
 
     const clearSession = (c: Context): void => {
         deleteCookie(c, resolved.name, resolved.options);
     };
 
-    const createSession = async ({
-        account_id,
-        context,
-        data,
-    }: CreateSessionInput<TData>): Promise<Session<TData>> => {
-        const created = await auth.session.create({
-            account_id,
-            client: await getSessionClient(context),
-            data,
-        });
-
-        setToken({
-            context,
-            expires_at: created.session.expires_at,
-            token: created.token,
-        });
-
-        return created.session;
-    };
-
-    const resolveSession = async (c: Context): Promise<Session<TData>> => {
+    const requireToken = (c: Context): string => {
         const token = getToken(c);
 
         if (!token) {
+            clearSession(c);
             throw createError({
                 code: "SESSION_INVALID",
                 message: "Authentication required.",
             });
         }
 
+        return token;
+    };
+
+    const createSession = async ({ account_id, context }: CreateSessionInput): Promise<Session> => {
+        const created = await auth.session.create({
+            account_id,
+            client: await getSessionClient(context),
+        });
+
+        setSession({
+            context,
+            session: created.session,
+            token: created.token,
+        });
+
+        return created.session;
+    };
+
+    const resolveSession = async (c: Context): Promise<ResolvedSession> => {
+        const token = requireToken(c);
         let resolvedSession;
 
         try {
@@ -206,22 +203,44 @@ export const createHonoAdapter = <TData extends object>({
             });
         }
 
-        if (resolvedSession.renewed) {
-            setToken({
-                context: c,
-                expires_at: resolvedSession.session.expires_at,
+        return resolvedSession;
+    };
+
+    const renewSession = async (c: Context): Promise<Session> => {
+        const token = requireToken(c);
+        let renewed;
+
+        try {
+            renewed = await auth.session.renew({
+                client: await getSessionClient(c),
                 token,
+            });
+        } catch (error) {
+            if (isAuthError(error) && error.code === "SESSION_CLIENT_MISMATCH") {
+                clearSession(c);
+            }
+
+            throw error;
+        }
+
+        if (!renewed) {
+            clearSession(c);
+            throw createError({
+                code: "SESSION_INVALID",
+                message: "Authentication required.",
             });
         }
 
-        return resolvedSession.session;
+        setSession({ context: c, session: renewed.session, token });
+        return renewed.session;
     };
 
-    const requireSession: MiddlewareHandler<HonoAuthEnv<TData>> = async (c, next) => {
-        const session = await resolveSession(c);
+    const requireSession: MiddlewareHandler<HonoAuthEnv> = async (c, next) => {
+        const { account, session, user } = await resolveSession(c);
 
         c.set("session", session);
-        c.set("account", session.data);
+        c.set("account", account);
+        c.set("user", user);
         await next();
     };
 
@@ -230,7 +249,6 @@ export const createHonoAdapter = <TData extends object>({
         const revoked = token ? await auth.session.revokeToken(token) : [];
 
         clearSession(c);
-
         return revoked;
     };
 
@@ -238,23 +256,22 @@ export const createHonoAdapter = <TData extends object>({
         clearSession,
         createSession,
         getToken,
+        renewSession,
         requireSession,
         resolveSession,
         revokeSession,
     };
 };
 
-export const createHonoAuth = <TData extends object = Record<string, unknown>>({
+export const createHonoAuth = ({
     cookie,
     db,
     getIp,
     password,
-    redis,
     session,
-}: HonoAuthConfig): HonoAuth<TData> => {
-    const auth = createAuth<TData>({
+}: HonoAuthConfig): HonoAuth => {
+    const auth = createAuth({
         db,
-        redis,
         ...(password === undefined ? {} : { password }),
         ...(session === undefined ? {} : { session }),
     });

@@ -12,10 +12,13 @@ export type { AuthError, AuthErrorCode } from "./errors.js";
 export type { PasswordService } from "./password/index.js";
 export type {
     ActiveSession,
+    AuthAccount,
+    AuthSessionRecord,
+    AuthUser,
     CreateSessionRecord,
     CreatedSession,
     DbAdapter,
-    RedisAdapter,
+    RenewedSession,
     ResolvedSession,
     Session,
     SessionInput,

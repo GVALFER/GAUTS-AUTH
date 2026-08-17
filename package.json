@@ -17,7 +17,7 @@
         "argon2",
         "bcrypt",
         "hono",
-        "redis",
+        "nextjs",
         "session"
     ],
     "type": "module",
@@ -36,10 +36,6 @@
             "types": "./dist/index.d.ts",
             "import": "./dist/index.js"
         },
-        "./redis": {
-            "types": "./dist/adapters/redis/index.d.ts",
-            "import": "./dist/adapters/redis/index.js"
-        },
         "./prisma": {
             "types": "./dist/adapters/prisma/index.d.ts",
             "import": "./dist/adapters/prisma/index.js"
@@ -47,6 +43,10 @@
         "./hono": {
             "types": "./dist/adapters/hono/index.d.ts",
             "import": "./dist/adapters/hono/index.js"
+        },
+        "./next": {
+            "types": "./dist/adapters/next/index.d.ts",
+            "import": "./dist/adapters/next/index.js"
         }
     },
     "scripts": {
@@ -56,7 +56,6 @@
         "typecheck:example": "npm run build && tsc -p examples/hono/tsconfig.json",
         "lint": "eslint src tests examples",
         "test": "node --import tsx --test tests/**/*.test.ts",
-        "test:redis": "node --import tsx --test tests/redis.integration.test.ts",
         "check": "npm run build && npm run lint && npm run typecheck && npm test",
         "prepack": "npm run check"
     },
@@ -69,13 +68,13 @@
     },
     "peerDependencies": {
         "hono": "^4.13.0",
-        "redis": "^6.2.0"
+        "next": ">=15.0.0"
     },
     "peerDependenciesMeta": {
         "hono": {
             "optional": true
         },
-        "redis": {
+        "next": {
             "optional": true
         }
     },
@@ -85,7 +84,7 @@
         "eslint": "^9.39.5",
         "globals": "^16.5.0",
         "hono": "^4.13.0",
-        "redis": "^6.2.0",
+        "next": "^16.2.12",
         "tsx": "^4.23.0",
         "typescript": "^5.9.3",
         "typescript-eslint": "^8.66.0"

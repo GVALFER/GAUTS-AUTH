@@ -3,7 +3,7 @@ import { resolvePasswordConfig, resolveSessionConfig } from "./config.js";
 import { createError } from "./errors.js";
 import { createPassword, type PasswordService } from "./password/index.js";
 import { createSessionService } from "./session/service.js";
-import type { DbAdapter, RedisAdapter, SessionService } from "./session/types.js";
+import type { DbAdapter, SessionService } from "./session/types.js";
 
 export type AuthConfig = {
     password?: PasswordConfig;
@@ -12,12 +12,11 @@ export type AuthConfig = {
 
 export type AuthDeps = AuthConfig & {
     db: DbAdapter;
-    redis: RedisAdapter;
 };
 
-export type Auth<TData extends object> = {
+export type Auth = {
     password: PasswordService;
-    session: SessionService<TData>;
+    session: SessionService;
 };
 
 type RequireMethodsInput = {
@@ -44,19 +43,9 @@ const requireMethods = ({ methods, name, value }: RequireMethodsInput): void => 
     }
 };
 
-export const createAuth = <TData extends object = Record<string, unknown>>({
-    db,
-    password,
-    redis,
-    session,
-}: AuthDeps): Auth<TData> => {
+export const createAuth = ({ db, password, session }: AuthDeps): Auth => {
     requireMethods({
-        methods: ["create", "delete", "exists", "get", "getMany", "keep", "update"],
-        name: "Redis",
-        value: redis,
-    });
-    requireMethods({
-        methods: ["create", "find", "findActive", "revoke", "updateExpiry"],
+        methods: ["create", "find", "findActive", "findToken", "revoke", "updateExpiry"],
         name: "DB",
         value: db,
     });
@@ -66,7 +55,6 @@ export const createAuth = <TData extends object = Record<string, unknown>>({
         session: createSessionService({
             config: resolveSessionConfig(session),
             db,
-            redis,
         }),
     };
 };

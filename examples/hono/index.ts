@@ -1,45 +1,38 @@
 import { Hono, type Context } from "hono";
 import { isAuthError, type DbAdapter } from "@gauts/auth";
 import { createHonoAuth, type HonoAuthEnv } from "@gauts/auth/hono";
-import { createRedisAdapter } from "@gauts/auth/redis";
-import type { RedisClientType } from "redis";
 
-type AccountSession = {
+type Account = {
     email: string;
-    role: "admin" | "owner";
-};
-
-type Account = AccountSession & {
     id: string;
     passwordHash: string;
+    role: "OWNER" | "ADMIN" | "BILLING" | "SUPPORT" | "VIEWER";
+    user: {
+        id: string;
+        role: "ADMIN" | "CLIENT";
+    };
 };
 
 type ExampleDeps = {
     db: DbAdapter;
     findAccount: (email: string) => Promise<Account | null>;
     getIp: (c: Context) => Promise<string | null | undefined> | string | null | undefined;
-    redis: RedisClientType;
 };
 
-export const createApp = ({ db, findAccount, getIp, redis }: ExampleDeps) => {
-    const auth = createHonoAuth<AccountSession>({
+export const createApp = ({ db, findAccount, getIp }: ExampleDeps) => {
+    const auth = createHonoAuth({
         db,
         getIp,
-        redis: createRedisAdapter({
-            client: redis,
-            config: { prefix: "example:auth" },
-        }),
     });
 
-    const app = new Hono<HonoAuthEnv<AccountSession>>();
+    const app = new Hono<HonoAuthEnv>();
 
     app.onError((error, c) => {
         if (!isAuthError(error)) {
             return c.json({ error: "Internal server error." }, 500);
         }
 
-        const status =
-            error.code === "REDIS_UNAVAILABLE" || error.code === "DB_UNAVAILABLE" ? 503 : 401;
+        const status = error.code === "DB_UNAVAILABLE" ? 503 : 401;
 
         return c.json({ error: error.message }, status);
     });
@@ -62,16 +55,19 @@ export const createApp = ({ db, findAccount, getIp, redis }: ExampleDeps) => {
             return c.json({ error: "Invalid credentials." }, 401);
         }
 
-        const session = await auth.createSession({
+        await auth.createSession({
             account_id: account.id,
             context: c,
-            data: {
-                email: account.email,
-                role: account.role,
-            },
         });
 
-        return c.json({ account: session.data });
+        return c.json({
+            account: {
+                email: account.email,
+                id: account.id,
+                role: account.role,
+            },
+            user: account.user,
+        });
     });
 
     app.post("/auth/logout", async (c) => {
@@ -79,8 +75,16 @@ export const createApp = ({ db, findAccount, getIp, redis }: ExampleDeps) => {
         return c.body(null, 204);
     });
 
+    app.post("/auth/renew", async (c) => {
+        await auth.renewSession(c);
+        return c.body(null, 204);
+    });
+
     app.get("/account", auth.requireSession, (c) => {
-        return c.json({ account: c.get("account") });
+        return c.json({
+            account: c.get("account"),
+            user: c.get("user"),
+        });
     });
 
     return app;
