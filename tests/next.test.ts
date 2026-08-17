@@ -21,6 +21,8 @@ const createRequest = ({
             "CF-Connecting-IP": "192.0.2.10",
             "User-Agent": "Next Test",
             "X-Private-Header": "private",
+            "X-Forwarded-Host": "admin.example.com",
+            "X-Forwarded-Proto": "https",
         },
     });
 };
@@ -40,6 +42,7 @@ describe("Next adapter", () => {
             "user-agent",
             "x-forwarded-for",
             "x-forwarded-host",
+            "x-forwarded-proto",
             "x-real-ip",
         ]);
     });
@@ -118,6 +121,71 @@ describe("Next adapter", () => {
                 "session=updated; Path=/; HttpOnly",
                 "session-renew=1786968000; Path=/; HttpOnly",
             ]);
+        } finally {
+            globalThis.fetch = originalFetch;
+        }
+    });
+
+    it("derives the public origin from the forwarded host", async () => {
+        const originalFetch = globalThis.fetch;
+        let init: RequestInit | undefined;
+        globalThis.fetch = async (_input, options) => {
+            init = options;
+            return new Response(null, { status: 204 });
+        };
+
+        try {
+            const auth = createNextAuth({
+                cookie: { name: "session", renewName: "session-renew" },
+                renewUrl: "http://api:4002/auth/renew",
+            });
+            const request = new NextRequest("https://0.0.0.0:4001/account", {
+                headers: {
+                    Cookie: `session=${token}`,
+                    "X-Forwarded-Host": "admin.example.com",
+                    "X-Forwarded-Proto": "https",
+                },
+            });
+
+            await auth.renew({
+                request,
+                response: NextResponse.next(),
+            });
+
+            const headers = new Headers(init?.headers);
+            assert.equal(headers.get("origin"), "https://admin.example.com");
+            assert.equal(headers.get("x-forwarded-host"), "admin.example.com");
+        } finally {
+            globalThis.fetch = originalFetch;
+        }
+    });
+
+    it("does not invent missing proxy headers", async () => {
+        const originalFetch = globalThis.fetch;
+        let init: RequestInit | undefined;
+        globalThis.fetch = async (_input, options) => {
+            init = options;
+            return new Response(null, { status: 204 });
+        };
+
+        try {
+            const auth = createNextAuth({
+                cookie: { name: "session", renewName: "session-renew" },
+                renewUrl: "http://api:4002/auth/renew",
+            });
+            const request = new NextRequest("https://0.0.0.0:4001/account", {
+                headers: { Cookie: `session=${token}` },
+            });
+
+            await auth.renew({
+                request,
+                response: NextResponse.next(),
+            });
+
+            const headers = new Headers(init?.headers);
+            assert.equal(headers.get("origin"), null);
+            assert.equal(headers.get("x-forwarded-host"), null);
+            assert.equal(headers.get("x-forwarded-proto"), null);
         } finally {
             globalThis.fetch = originalFetch;
         }
