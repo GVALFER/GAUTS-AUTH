@@ -39,6 +39,7 @@ describe("Next adapter", () => {
             "true-client-ip",
             "user-agent",
             "x-forwarded-for",
+            "x-forwarded-host",
             "x-real-ip",
         ]);
     });
@@ -108,6 +109,7 @@ describe("Next adapter", () => {
             assert.equal(headers.get("cf-connecting-ip"), "192.0.2.10");
             assert.equal(headers.get("origin"), "https://admin.example.com");
             assert.equal(headers.get("user-agent"), "Next Test");
+            assert.equal(headers.get("x-forwarded-host"), "admin.example.com");
 
             const setCookies = (
                 result.response.headers as Headers & { getSetCookie: () => string[] }

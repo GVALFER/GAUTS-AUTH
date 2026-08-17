@@ -52,6 +52,7 @@ export const FORWARD_HEADERS = [
     "true-client-ip",
     "user-agent",
     "x-forwarded-for",
+    "x-forwarded-host",
     "x-real-ip",
 ] as const;
 
@@ -81,6 +82,10 @@ const getForwardHeaders = ({ name, request, token }: ForwardHeadersInput): Heade
 
     if (!headers.has("origin")) {
         headers.set("origin", request.nextUrl.origin);
+    }
+
+    if (!headers.get("x-forwarded-host")?.trim()) {
+        headers.set("x-forwarded-host", request.nextUrl.host);
     }
 
     return headers;

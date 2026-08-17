@@ -407,7 +407,7 @@ Result semantics:
 | `false` | `401` | Session token is missing or malformed. No API call occurred. |
 | `true` | HTTP status | `/auth/renew` was called and its `Set-Cookie` headers were copied. |
 
-The adapter forwards only the session cookie and the client/origin headers required for session and CSRF validation. If the browser request has no `Origin`, it uses the public origin from `NextRequest`. Other cookies, `Authorization`, and arbitrary request headers are never forwarded. Renewal rejects redirects and times out after five seconds. `renewUrl` must point to the application's trusted private API.
+The adapter forwards only the session cookie and the client/origin headers required for session, host, and CSRF validation. If the browser request has no `Origin` or `X-Forwarded-Host`, it derives them from the public `NextRequest` URL. Other cookies, `Authorization`, and arbitrary request headers are never forwarded. Renewal rejects redirects and times out after five seconds. `renewUrl` must point to the application's trusted private API.
 
 Protected API endpoints remain responsible for real authentication. The renewal marker is only a browser scheduling mechanism and never acts as a refresh token.
 
