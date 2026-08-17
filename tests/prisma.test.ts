@@ -33,15 +33,15 @@ type AccountRow = {
     id: string;
     name: string;
     password_hash: string;
-    role: string;
-    status: string;
+    role: "ADMIN" | "OWNER";
+    status: "ACTIVE" | "INACTIVE" | "PENDING";
     timezone: string | null;
 };
 
 type UserRow = {
     id: string;
-    role: string;
-    status: string;
+    role: "ADMIN" | "USER";
+    status: "ACTIVE" | "INACTIVE" | "PENDING";
 };
 
 type LegacyAccountRow = {
@@ -268,9 +268,9 @@ const assertTypes = () => {
     // @ts-expect-error status was not selected for the nested user payload.
     void typedAccount.user.status;
 
+    // @ts-expect-error unknown account fields are rejected.
     createPrismaAdapter({
         client,
-        // @ts-expect-error unknown account fields are rejected.
         models: { account: { select: ["missing"] } },
     });
 };

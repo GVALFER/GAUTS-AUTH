@@ -61,7 +61,7 @@ type AuthField<Row> = {
 }[keyof Row] &
     string;
 
-type AccessRule<Value> = Value extends AuthScalar ? Value | readonly Value[] : never;
+type AccessRule<Value> = [Value] extends [AuthScalar] ? Value | readonly Value[] : never;
 
 type ModelAccess<Row> = Partial<{
     [Key in AuthField<Row>]: AccessRule<Row[Key]>;
@@ -81,14 +81,13 @@ type AccountChoice<Client, NameRequired extends boolean> = {
     [Name in PrismaAccountModel<Client>]: ModelConfig<Client, Name, NameRequired>;
 }[PrismaAccountModel<Client>];
 
-type DefaultAccountConfig<Client> =
-    "account" extends keyof Client
-        ? IsDefaultAccountModel<Client["account"]> extends true
-            ? Omit<ModelConfig<Client, "account", false>, "name"> & {
-                  name?: "account";
-              }
-            : never
-        : never;
+type DefaultAccountConfig<Client> = "account" extends keyof Client
+    ? IsDefaultAccountModel<Client["account"]> extends true
+        ? Omit<ModelConfig<Client, "account", false>, "name"> & {
+              name?: "account";
+          }
+        : never
+    : never;
 
 type CustomAccountConfig<Client> = AccountChoice<Client, true>;
 
@@ -107,12 +106,11 @@ type CustomSessionConfig<Client> = {
 export type PrismaSessionConfig<Client> =
     DefaultSessionConfig<Client> | CustomSessionConfig<Client>;
 
-type AccountProperty<Client> =
-    "account" extends keyof Client
-        ? IsDefaultAccountModel<Client["account"]> extends true
-            ? { account?: PrismaAccountConfig<Client> }
-            : { account: CustomAccountConfig<Client> }
-        : { account: CustomAccountConfig<Client> };
+type AccountProperty<Client> = "account" extends keyof Client
+    ? IsDefaultAccountModel<Client["account"]> extends true
+        ? { account?: PrismaAccountConfig<Client> }
+        : { account: CustomAccountConfig<Client> }
+    : { account: CustomAccountConfig<Client> };
 
 type SessionProperty<Client> =
     "sessions" extends PrismaSessionModel<Client>
@@ -121,14 +119,13 @@ type SessionProperty<Client> =
 
 export type PrismaModelsConfig<Client> = AccountProperty<Client> & SessionProperty<Client>;
 
-type HasDefaults<Client> =
-    "account" extends keyof Client
-        ? IsDefaultAccountModel<Client["account"]> extends true
-            ? "sessions" extends PrismaSessionModel<Client>
-                ? true
-                : false
+type HasDefaults<Client> = "account" extends keyof Client
+    ? IsDefaultAccountModel<Client["account"]> extends true
+        ? "sessions" extends PrismaSessionModel<Client>
+            ? true
             : false
-        : false;
+        : false
+    : false;
 
 export type PrismaAdapterInput<
     Client extends object,
@@ -211,5 +208,12 @@ export type PrismaDb<
     Client extends object,
     Models extends PrismaModelsConfig<Client> | undefined,
 > = DbAdapter<PrismaAccount<Client, Models>>;
+
+export type CreatePrismaAdapter = {
+    <Client extends object>(input: PrismaAdapterInput<Client>): PrismaDb<Client, undefined>;
+    <Client extends object, const Models extends PrismaModelsConfig<Client>>(
+        input: PrismaAdapterInput<Client, Models>,
+    ): PrismaDb<Client, Models>;
+};
 
 export type { AuthAccount };

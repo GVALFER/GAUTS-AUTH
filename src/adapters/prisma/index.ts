@@ -9,7 +9,13 @@ import {
     requireRows,
     sessionSelect,
 } from "./model.js";
-import type { PrismaAccount, PrismaAdapterInput, PrismaDb, PrismaModelsConfig } from "./types.js";
+import type {
+    CreatePrismaAdapter,
+    PrismaAccount,
+    PrismaAdapterInput,
+    PrismaDb,
+    PrismaModelsConfig,
+} from "./types.js";
 
 export type {
     PrismaAccount,
@@ -22,7 +28,7 @@ export type {
     PrismaSessionModel,
 } from "./types.js";
 
-export const createPrismaAdapter = <
+export const createPrismaAdapter: CreatePrismaAdapter = <
     Client extends object,
     const Models extends PrismaModelsConfig<Client> | undefined = undefined,
 >(
