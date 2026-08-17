@@ -69,6 +69,7 @@ const createMockAuth = (
 ): Auth => ({
     config: {
         session: {
+            maxLifetime: 30 * 24 * 60 * 60,
             renewInterval: 24 * 60 * 60,
             ttl: 7 * 24 * 60 * 60,
             validation: ["ip", "agent"],

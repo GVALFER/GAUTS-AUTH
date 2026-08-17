@@ -38,3 +38,9 @@ The cache is bound to the opaque session token, its own expiry, the authoritativ
 Cookie caching introduces a bounded consistency window. A session revoked on another device, or account/user access changed in the database, may remain readable until the cache TTL expires. Unsafe methods, renewal, logout, WebSockets, and direct core calls always validate through the database. Applications requiring immediate cross-device read revocation must leave the cache disabled or provide shared server-side enforcement outside this package.
 
 Keep `AUTH_SECRET` in the API environment. Do not expose it to browser code or share it with a frontend merely to inspect the renewal marker. The marker is intentionally untrusted and never authenticates or renews a session by itself.
+
+## Session lifetime
+
+Sliding renewal is limited by `session.maxLifetime`, which defaults to 30 days from the original login. The maximum expiry is derived from the immutable session `created_at` value and enforced by the core during resolution and renewal. Browser cookies and cached session data never outlive the authoritative session expiry.
+
+Activity and possession of the session token cannot extend this absolute limit. After it is reached, the user must authenticate again and receive a new session token.

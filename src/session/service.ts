@@ -63,29 +63,49 @@ export const createSessionService = ({
         }
     };
 
-    const getRenewAt = (expires_at: Date): Date => {
-        return new Date(expires_at.getTime() - (config.ttl - config.renewInterval) * 1000);
+    const getMaxExpiresAt = (created_at: Date): Date => {
+        return new Date(created_at.getTime() + config.maxLifetime * 1000);
     };
 
-    const toSession = (row: SessionRecord): Session => ({
-        account_id: row.account_id,
-        client: {
-            agent: row.agent,
-            ip: row.ip,
-            platform: row.platform,
-        },
-        created_at: row.created_at,
-        expires_at: row.expires_at,
-        id: row.id,
-        renew_at: getRenewAt(row.expires_at),
-    });
+    const getRenewAt = (row: SessionRecord): Date => {
+        const renewed_at = row.updated_at ?? row.created_at;
+
+        return new Date(
+            Math.min(
+                renewed_at.getTime() + config.renewInterval * 1000,
+                getMaxExpiresAt(row.created_at).getTime(),
+            ),
+        );
+    };
+
+    const toSession = (row: SessionRecord): Session => {
+        const expires_at = new Date(
+            Math.min(row.expires_at.getTime(), getMaxExpiresAt(row.created_at).getTime()),
+        );
+
+        return {
+            account_id: row.account_id,
+            client: {
+                agent: row.agent,
+                ip: row.ip,
+                platform: row.platform,
+            },
+            created_at: row.created_at,
+            expires_at,
+            id: row.id,
+            renew_at: getRenewAt(row),
+        };
+    };
 
     const getActive = async (account_id: string): Promise<SessionRecord[]> => {
         const current = now();
         const rows = await runDb(() => db.findActive({ account_id, now: current }));
 
         return rows.filter(
-            (row) => row.revoked_at === null && row.expires_at.getTime() > current.getTime(),
+            (row) =>
+                row.revoked_at === null &&
+                row.expires_at.getTime() > current.getTime() &&
+                getMaxExpiresAt(row.created_at).getTime() > current.getTime(),
         );
     };
 
@@ -113,7 +133,10 @@ export const createSessionService = ({
 
         const current = now();
 
-        if (row.expires_at.getTime() <= current.getTime()) {
+        if (
+            row.expires_at.getTime() <= current.getTime() ||
+            getMaxExpiresAt(row.created_at).getTime() <= current.getTime()
+        ) {
             return null;
         }
 
@@ -167,7 +190,13 @@ export const createSessionService = ({
             }
 
             const created_at = now();
-            const expires_at = new Date(created_at.getTime() + config.ttl * 1000);
+            const expires_at = new Date(
+                Math.min(
+                    created_at.getTime() + config.ttl * 1000,
+                    getMaxExpiresAt(created_at).getTime(),
+                ),
+            );
+
             const token = createToken();
             const row: SessionRecord = {
                 account_id: input.account_id,
@@ -237,7 +266,7 @@ export const createSessionService = ({
 
             const { current, row } = validated;
 
-            if (current.getTime() < getRenewAt(row.expires_at).getTime()) {
+            if (current.getTime() < getRenewAt(row).getTime()) {
                 return {
                     account: row.account,
                     renewed: false,
@@ -246,7 +275,13 @@ export const createSessionService = ({
                 };
             }
 
-            const expires_at = new Date(current.getTime() + config.ttl * 1000);
+            const expires_at = new Date(
+                Math.min(
+                    current.getTime() + config.ttl * 1000,
+                    getMaxExpiresAt(row.created_at).getTime(),
+                ),
+            );
+
             await runDb(() =>
                 db.updateExpiry({
                     expires_at,

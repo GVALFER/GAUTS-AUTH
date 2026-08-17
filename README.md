@@ -10,7 +10,7 @@ cache cookie   -> short signed session snapshot
 renew cookie   -> untrusted renewal marker
 ```
 
-Only the opaque session token authenticates. It remains stable during sliding renewal. The optional cache is disabled when omitted and never replaces database validation for unsafe methods, renewal, logout, WebSockets, or direct core calls.
+Only the opaque session token authenticates. It remains stable during sliding renewal, but the session can never exceed its configured maximum lifetime. The optional cache is disabled when omitted and never replaces database validation for unsafe methods, renewal, logout, WebSockets, or direct core calls.
 
 ## Requirements
 
@@ -86,11 +86,11 @@ Next checks the renewal marker
     -> marker exists: no API call
     -> marker missing: POST /auth/renew
     -> API performs full DB validation
-    -> DB expires_at = now + ttl
+    -> DB expires_at = min(now + ttl, created_at + maxLifetime)
     -> Set-Cookie with same token, a new marker, and a fresh cache
 ```
 
-`auth.session.resolve()` is always DB-backed and read-only. Only the explicit renewal operation updates database expiry.
+`auth.session.resolve()` is always DB-backed and read-only. Only the explicit renewal operation updates database expiry, and neither activity nor renewal can extend the session beyond `maxLifetime`.
 
 ## Prisma schema contract
 
@@ -333,7 +333,7 @@ app.post("/auth/renew", async (c) => {
 });
 ```
 
-`renewSession` always performs full database validation. It independently derives whether renewal is due from the database `expires_at`; the renewal marker never authorizes renewal.
+`renewSession` always performs full database validation. It independently derives whether renewal is due from `created_at` and the last database renewal; the renewal marker never authorizes renewal.
 
 If renewal is not yet due, database expiry is not changed. The API still returns the authoritative session cookie, renewal marker, and cache.
 
@@ -445,6 +445,7 @@ The selected algorithm is used for both hashing and verification. The package ne
 
 ```ts
 session: {
+    maxLifetime: 30 * 24 * 60 * 60,
     renewInterval: 24 * 60 * 60,
     ttl: 7 * 24 * 60 * 60,
     validation: ["agent"],
@@ -455,15 +456,20 @@ Time values are seconds.
 
 | Property | Default | Allowed | Purpose |
 | --- | ---: | ---: | --- |
+| `maxLifetime` | `2,592,000` | `ttl` to `31,536,000` | Maximum lifetime from the original login, regardless of activity. |
 | `renewInterval` | `86,400` | `1` to `ttl - 1` | Minimum interval before renewal is due. |
 | `ttl` | `604,800` | `60` to `31,536,000` | Sliding inactivity lifetime. |
 | `validation` | `["agent"]` | Unique `agent`, `ip`, `platform` fields | Exact client fields compared on every validation. |
 
-The authoritative renewal time is derived as:
+The authoritative limits are derived from the immutable creation time and the last successful renewal:
 
 ```text
-renewAt = expires_at - (ttl - renewInterval)
+maxExpiresAt = created_at + maxLifetime
+expires_at   = min(now + ttl, maxExpiresAt)
+renew_at    = min((updated_at ?? created_at) + renewInterval, maxExpiresAt)
 ```
+
+`maxLifetime` must be greater than or equal to `ttl`. It is enforced by the session core and requires a new login after the limit is reached; no additional database column is required.
 
 ### Cookie
 

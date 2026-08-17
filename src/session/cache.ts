@@ -158,10 +158,13 @@ export const createSessionCache = ({
 
     return {
         create: ({ resolved, token }) => {
+            const max_expires_at =
+                resolved.session.created_at.getTime() + sessionConfig.maxLifetime * 1000;
             const expires_at = new Date(
                 Math.min(
                     now().getTime() + config.ttl * 1000,
                     resolved.session.expires_at.getTime(),
+                    max_expires_at,
                 ),
             );
 
@@ -200,11 +203,16 @@ export const createSessionCache = ({
 
             const current = now().getTime();
             const resolvedSession = toSession(payload.session);
+            const max_expires_at =
+                resolvedSession.created_at.getTime() + sessionConfig.maxLifetime * 1000;
 
             if (
                 payload.cache_expires_at <= current ||
                 resolvedSession.expires_at.getTime() <= current ||
+                max_expires_at <= current ||
                 payload.cache_expires_at > resolvedSession.expires_at.getTime() ||
+                payload.cache_expires_at > max_expires_at ||
+                resolvedSession.expires_at.getTime() > max_expires_at ||
                 !matchesClient({
                     current: normalizeClient(client),
                     stored: resolvedSession.client,

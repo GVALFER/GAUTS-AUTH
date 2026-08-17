@@ -91,6 +91,35 @@ describe("signed session cache", () => {
         assert.equal(harness.cache.resolve({ client, token, value: cached.value }), null);
     });
 
+    it("rejects cache data beyond the configured maximum lifetime", () => {
+        const now = () => new Date("2026-08-17T10:00:00.000Z");
+        const old = createSessionCache({
+            config: { ttl: 60 },
+            now,
+            secret,
+            session: resolveSessionConfig({
+                maxLifetime: 3_600,
+                renewInterval: 60,
+                ttl: 300,
+                validation: ["ip", "agent"],
+            }),
+        });
+        const current = createSessionCache({
+            config: { ttl: 60 },
+            now,
+            secret,
+            session: resolveSessionConfig({
+                maxLifetime: 300,
+                renewInterval: 60,
+                ttl: 300,
+                validation: ["ip", "agent"],
+            }),
+        });
+        const cached = old.create({ resolved, token });
+
+        assert.equal(current.resolve({ client, token, value: cached.value }), null);
+    });
+
     it("fails fast on weak secrets and invalid TTL values", () => {
         const session = resolveSessionConfig();
 

@@ -32,6 +32,11 @@ const account: AuthAccount = {
     },
 };
 
+type HarnessConfig = {
+    maxLifetime?: number;
+    validation?: readonly SessionValidation[];
+};
+
 const createDb = () => {
     let allowed = true;
     const rows = new Map<string, SessionRecord>();
@@ -93,11 +98,15 @@ const createDb = () => {
     };
 };
 
-const createHarness = (validation: readonly SessionValidation[] = ["agent"]) => {
+const createHarness = ({
+    maxLifetime = 1_800,
+    validation = ["agent"],
+}: HarnessConfig = {}) => {
     let current = new Date("2026-08-15T12:00:00.000Z");
     const db = createDb();
     const session = createSessionService({
         config: resolveSessionConfig({
+            maxLifetime,
             renewInterval: 60,
             ttl: 300,
             validation,
@@ -208,6 +217,40 @@ describe("session service", () => {
         );
     });
 
+    it("never renews a session beyond its maximum lifetime", async () => {
+        const harness = createHarness({ maxLifetime: 360 });
+        const created = await harness.session.create({
+            account_id: account.id,
+            client,
+        });
+
+        harness.advance(61);
+        const first = await harness.session.renew({
+            client,
+            token: created.token,
+        });
+
+        assert.equal(first?.renewed, true);
+        assert.equal(first?.session.expires_at.toISOString(), "2026-08-15T12:06:00.000Z");
+        assert.equal(first?.session.renew_at.toISOString(), "2026-08-15T12:02:01.000Z");
+
+        harness.advance(60);
+        const second = await harness.session.renew({
+            client,
+            token: created.token,
+        });
+
+        assert.equal(second?.renewed, true);
+        assert.equal(second?.session.expires_at.toISOString(), "2026-08-15T12:06:00.000Z");
+        assert.equal(second?.session.renew_at.toISOString(), "2026-08-15T12:03:01.000Z");
+
+        harness.advance(239);
+        assert.equal(
+            await harness.session.resolve({ client, token: created.token }),
+            null,
+        );
+    });
+
     it("rejects inactive sessions", async () => {
         const harness = createHarness();
         const created = await harness.session.create({
@@ -227,7 +270,7 @@ describe("session service", () => {
     });
 
     it("revokes a session when a configured client field changes", async () => {
-        const harness = createHarness(["ip", "agent"]);
+        const harness = createHarness({ validation: ["ip", "agent"] });
         const created = await harness.session.create({
             account_id: account.id,
             client,
@@ -248,7 +291,7 @@ describe("session service", () => {
     });
 
     it("rejects creation when a configured client field is missing", async () => {
-        const harness = createHarness(["ip", "agent"]);
+        const harness = createHarness({ validation: ["ip", "agent"] });
 
         await assert.rejects(
             harness.session.create({
@@ -261,7 +304,7 @@ describe("session service", () => {
     });
 
     it("revokes an existing session when a configured field is missing", async () => {
-        const harness = createHarness(["ip", "agent"]);
+        const harness = createHarness({ validation: ["ip", "agent"] });
         const created = await harness.session.create({
             account_id: account.id,
             client,

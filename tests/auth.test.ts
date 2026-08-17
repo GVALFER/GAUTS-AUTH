@@ -49,6 +49,7 @@ describe("auth configuration", () => {
     });
 
     it("validates session client fields during startup", () => {
+        assert.equal(resolveSessionConfig().maxLifetime, 30 * 24 * 60 * 60);
         assert.deepEqual(resolveSessionConfig().validation, ["agent"]);
         assert.deepEqual(
             resolveSessionConfig({ validation: ["ip", "platform", "agent"] }).validation,
@@ -61,6 +62,10 @@ describe("auth configuration", () => {
         );
         assert.throws(
             () => resolveSessionConfig({ validation: ["ip", "ip"] }),
+            (error) => isAuthError(error) && error.code === "AUTH_CONFIG_INVALID",
+        );
+        assert.throws(
+            () => resolveSessionConfig({ maxLifetime: 299, ttl: 300 }),
             (error) => isAuthError(error) && error.code === "AUTH_CONFIG_INVALID",
         );
     });
