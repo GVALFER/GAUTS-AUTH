@@ -84,6 +84,32 @@ describe("password service", () => {
     );
   });
 
+  it("rejects missing password hashes with the configured algorithm", async () => {
+    const argon2id = createPassword(
+      resolvePasswordConfig({ memoryCost: 8192, timeCost: 1 }),
+    );
+    const bcrypt = createPassword(
+      resolvePasswordConfig({ algorithm: "bcrypt", rounds: 4 }),
+    );
+
+    assert.equal(
+      await argon2id.verify({ password: "password", storedHash: null }),
+      false,
+    );
+    assert.equal(
+      await argon2id.verify({ password: "password", storedHash: undefined }),
+      false,
+    );
+    assert.equal(
+      await bcrypt.verify({ password: "password", storedHash: null }),
+      false,
+    );
+    assert.equal(
+      await bcrypt.verify({ password: "password", storedHash: undefined }),
+      false,
+    );
+  });
+
   it("rejects empty and oversized password input", async () => {
     const password = createPassword(resolvePasswordConfig({ maxBytes: 8 }));
 

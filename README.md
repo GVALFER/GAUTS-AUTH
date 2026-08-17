@@ -101,7 +101,6 @@ import type { AuthAccountOf } from "@gauts/auth";
 import type { HonoAuthEnv } from "@gauts/auth/hono";
 
 import { auth } from "./auth.js";
-import { DUMMY_PASSWORD_HASH } from "./password.js";
 
 type Account = AuthAccountOf<typeof auth>;
 
@@ -117,7 +116,7 @@ app.post("/auth/login", async (c) => {
 
     const passwordValid = await auth.password.verify({
         password: body.password,
-        storedHash: account?.passwordHash ?? DUMMY_PASSWORD_HASH,
+        storedHash: account?.passwordHash,
     });
 
     if (!account || !passwordValid) {
@@ -150,7 +149,7 @@ app.get("/account", auth.requireSession, (c) => {
 });
 ```
 
-Precompute `DUMMY_PASSWORD_HASH` once with the same algorithm and cost as the application. This ensures unknown accounts perform equivalent password verification work. Keep the response identical for unknown accounts and incorrect passwords.
+When `storedHash` is missing, the package performs password work with the configured algorithm and always returns `false`. Applications do not need a dummy hash. Keep the response identical for unknown accounts and incorrect passwords.
 
 ### 3. Enable the optional cache
 
@@ -227,6 +226,8 @@ password: {
 ```
 
 The package does not detect algorithms, migrate hashes, rehash passwords, or fall back to another algorithm.
+
+`auth.password.verify()` accepts a missing `storedHash` so account lookup and password verification can follow one path. A missing or incompatible hash performs password work with the configured algorithm and returns `false`; it is never accepted or passed to another algorithm.
 
 ### Session
 

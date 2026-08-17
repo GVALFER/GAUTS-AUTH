@@ -6,7 +6,7 @@ import { createError } from "../errors.js";
 export type PasswordService = {
     algorithm: "argon2id" | "bcrypt";
     hash(password: string): Promise<string>;
-    verify(input: { password: string; storedHash: string }): Promise<boolean>;
+    verify(input: { password: string; storedHash?: string | null | undefined }): Promise<boolean>;
 };
 
 type RequirePasswordProps = {
@@ -29,52 +29,62 @@ const requirePassword = ({ password, maxBytes }: RequirePasswordProps) => {
 
 const createArgon2id = (
     config: Extract<ResolvedPasswordConfig, { algorithm: "argon2id" }>,
-): PasswordService => ({
-    algorithm: "argon2id",
-
-    hash: async (password) => {
-        requirePassword({ maxBytes: config.maxBytes, password });
-
-        return argon2.hash(password, {
+): PasswordService => {
+    const hashValue = (password: string) =>
+        argon2.hash(password, {
             hashLength: config.hashLength,
             memoryCost: config.memoryCost,
             parallelism: config.parallelism,
             timeCost: config.timeCost,
             type: argon2.argon2id,
         });
-    },
 
-    verify: async ({ password, storedHash }) => {
-        requirePassword({ maxBytes: config.maxBytes, password });
+    return {
+        algorithm: "argon2id",
 
-        if (!storedHash.startsWith("$argon2id$")) {
-            return false;
-        }
+        hash: async (password) => {
+            requirePassword({ maxBytes: config.maxBytes, password });
+            return hashValue(password);
+        },
 
-        return argon2.verify(storedHash, password);
-    },
-});
+        verify: async ({ password, storedHash }) => {
+            requirePassword({ maxBytes: config.maxBytes, password });
+
+            if (!storedHash?.startsWith("$argon2id$")) {
+                await hashValue(password);
+                return false;
+            }
+
+            return argon2.verify(storedHash, password);
+        },
+    };
+};
 
 const createBcrypt = (
     config: Extract<ResolvedPasswordConfig, { algorithm: "bcrypt" }>,
-): PasswordService => ({
-    algorithm: "bcrypt",
+): PasswordService => {
+    const hashValue = (password: string) => hashBcrypt(password, config.rounds);
 
-    hash: async (password) => {
-        requirePassword({ maxBytes: config.maxBytes, password });
-        return hashBcrypt(password, config.rounds);
-    },
+    return {
+        algorithm: "bcrypt",
 
-    verify: async ({ password, storedHash }) => {
-        requirePassword({ maxBytes: config.verifyMaxBytes, password });
+        hash: async (password) => {
+            requirePassword({ maxBytes: config.maxBytes, password });
+            return hashValue(password);
+        },
 
-        if (!BCRYPT_PATTERN.test(storedHash)) {
-            return false;
-        }
+        verify: async ({ password, storedHash }) => {
+            requirePassword({ maxBytes: config.verifyMaxBytes, password });
 
-        return compareBcrypt(password, storedHash);
-    },
-});
+            if (!storedHash || !BCRYPT_PATTERN.test(storedHash)) {
+                await hashValue(password);
+                return false;
+            }
+
+            return compareBcrypt(password, storedHash);
+        },
+    };
+};
 
 export const createPassword = (config: ResolvedPasswordConfig): PasswordService => {
     return config.algorithm === "bcrypt" ? createBcrypt(config) : createArgon2id(config);
