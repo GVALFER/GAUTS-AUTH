@@ -6,27 +6,27 @@ Database-backed password authentication and opaque browser sessions for Node.js 
 
 ## Features
 
-| Capability | Support | Default |
-| --- | :---: | --- |
-| Argon2id password hashing | ✅ | Enabled |
-| bcrypt password hashing | ✅ | Opt-in |
-| Opaque server-side sessions | ✅ | Enabled |
-| Database-backed validation | ✅ | Enabled |
-| Sliding session renewal | ✅ | Every 24 hours |
-| Absolute session lifetime | ✅ | 30 days |
-| Signed browser cache | ✅ | Disabled |
-| Full User-Agent validation | ✅ | Enabled |
-| IP validation | ✅ | Disabled |
-| Platform validation | ✅ | Disabled |
-| Hono adapter | ✅ | Available |
-| Prisma adapter | ✅ | Available |
-| Next.js renewal adapter | ✅ | Available |
-| Session listing and revocation | ✅ | Available |
-| Token rotation | ❌ | Stable opaque token |
-| JWT sessions | ❌ | Not used |
-| Redis requirement | ❌ | Not required |
-| Registration, OAuth, OTP, or email | ❌ | Application-owned |
-| Route roles and permissions | ❌ | Application-owned |
+| Capability                         | Support | Default             |
+| ---------------------------------- | :-----: | ------------------- |
+| Argon2id password hashing          |   ✅    | Enabled             |
+| bcrypt password hashing            |   ✅    | Opt-in              |
+| Opaque server-side sessions        |   ✅    | Enabled             |
+| Database-backed validation         |   ✅    | Enabled             |
+| Sliding session renewal            |   ✅    | Every 24 hours      |
+| Absolute session lifetime          |   ✅    | 30 days             |
+| Signed browser cache               |   ✅    | Disabled            |
+| Full User-Agent validation         |   ✅    | Enabled             |
+| IP validation                      |   ✅    | Disabled            |
+| Platform validation                |   ✅    | Disabled            |
+| Hono adapter                       |   ✅    | Available           |
+| Prisma adapter                     |   ✅    | Available           |
+| Next.js renewal adapter            |   ✅    | Available           |
+| Session listing and revocation     |   ✅    | Available           |
+| Token rotation                     |   ❌    | Stable opaque token |
+| JWT sessions                       |   ❌    | Not used            |
+| Redis requirement                  |   ❌    | Not required        |
+| Registration, OAuth, OTP, or email |   ❌    | Application-owned   |
+| Route roles and permissions        |   ❌    | Application-owned   |
 
 “Session renewal” extends the existing session expiry when activity continues. It is not a refresh-token flow and does not rotate the opaque browser token.
 
@@ -55,12 +55,12 @@ npm install @gauts/auth next
 
 ### Package entry points
 
-| Import | Purpose |
-| --- | --- |
-| `@gauts/auth` | Password service, session core, errors, and public types. |
-| `@gauts/auth/prisma` | Prisma database adapter. |
-| `@gauts/auth/hono` | Hono cookies, methods, and middleware. |
-| `@gauts/auth/next` | Next.js renewal scheduling and `Set-Cookie` forwarding. |
+| Import               | Purpose                                                   |
+| -------------------- | --------------------------------------------------------- |
+| `@gauts/auth`        | Password service, session core, errors, and public types. |
+| `@gauts/auth/prisma` | Prisma database adapter.                                  |
+| `@gauts/auth/hono`   | Hono cookies, methods, and middleware.                    |
+| `@gauts/auth/next`   | Next.js renewal scheduling and `Set-Cookie` forwarding.   |
 
 ## Quick start
 
@@ -73,21 +73,21 @@ import { createHonoAuth } from "@gauts/auth/hono";
 import { createPrismaAdapter } from "@gauts/auth/prisma";
 
 import { prisma } from "./db.js";
-import { getTrustedClientIp } from "./getTrustedClientIp.js";
 
 export const auth = createHonoAuth({
     db: createPrismaAdapter({
         client: prisma,
         config: {
-            account: {
-                status: ["ACTIVE"],
-            },
-            user: {
-                status: ["ACTIVE"],
+            access: {
+                account: {
+                    allowedStatuses: ["ACTIVE"],
+                },
+                user: {
+                    allowedStatuses: ["ACTIVE"],
+                },
             },
         },
     }),
-    getIp: getTrustedClientIp,
 });
 ```
 
@@ -163,7 +163,6 @@ export const auth = createHonoAuth({
         ttl: 60,
     },
     db,
-    getIp: getTrustedClientIp,
     secret: requiredEnv("AUTH_SECRET"),
 });
 ```
@@ -176,21 +175,21 @@ export const auth = createHonoAuth({
 
 ### `createHonoAuth()`
 
-| Property | Type / allowed values | Required | Default | Description |
-| --- | --- | :---: | --- | --- |
-| `db` | `DbAdapter` | ✅ | — | Authoritative session persistence and account loading. |
-| `getIp` | `HonoGetIp` | ✅ | — | Returns the client IP from a source trusted by the application. May be synchronous or asynchronous. |
-| `password` | `PasswordConfig` | ❌ | Argon2id defaults | Password hashing and verification configuration. |
-| `session` | `SessionConfig` | ❌ | Session defaults | Expiry, renewal, and client validation configuration. |
-| `cookie` | `HonoCookieConfig` | ❌ | Cookie defaults | Names, domain, path, SameSite, and Secure settings. |
-| `cache` | `{ ttl: number }` | ❌ | Disabled | Enables the short signed browser cache. |
-| `secret` | `string` | When `cache` is enabled | — | HMAC secret for the signed cache. Minimum 32 UTF-8 bytes. |
+| Property   | Type / allowed values |        Required         | Default           | Description                                                                                         |
+| ---------- | --------------------- | :---------------------: | ----------------- | --------------------------------------------------------------------------------------------------- |
+| `db`       | `DbAdapter`           |           ✅            | —                 | Authoritative session persistence and account loading.                                              |
+| `getIp`    | `HonoGetIp`           | Only with IP validation | Omitted           | Returns the client IP from a source trusted by the application. May be synchronous or asynchronous. |
+| `password` | `PasswordConfig`      |           ❌            | Argon2id defaults | Password hashing and verification configuration.                                                    |
+| `session`  | `SessionConfig`       |           ❌            | Session defaults  | Expiry, renewal, and client validation configuration.                                               |
+| `cookie`   | `HonoCookieConfig`    |           ❌            | Cookie defaults   | Names, domain, path, SameSite, and Secure settings.                                                 |
+| `cache`    | `{ ttl: number }`     |           ❌            | Disabled          | Enables the short signed browser cache.                                                             |
+| `secret`   | `string`              | When `cache` is enabled | —                 | HMAC secret for the signed cache. Minimum 32 UTF-8 bytes.                                           |
 
 ```ts
-type HonoGetIp = (
-    c: Context,
-) => Promise<string | null | undefined> | string | null | undefined;
+type HonoGetIp = (c: Context) => Promise<string | null | undefined> | string | null | undefined;
 ```
+
+When `getIp` is omitted, the adapter stores `ip: null` and does not read IP headers automatically. Configuring `session.validation` with `"ip"` requires `getIp` and fails during initialization when it is missing.
 
 ### Password
 
@@ -198,14 +197,14 @@ type HonoGetIp = (
 
 Argon2id is selected when `password.algorithm` is omitted or set to `"argon2id"`.
 
-| Property | Type / allowed values | Default | Description |
-| --- | --- | ---: | --- |
-| `algorithm` | `"argon2id"` | `"argon2id"` | Password algorithm used for both hashing and verification. |
-| `hashLength` | Integer `16`–`64` | `32` | Output hash length in bytes. |
-| `maxBytes` | Integer `1`–`1,048,576` | `1024` | Maximum UTF-8 password size accepted by hashing and verification. |
-| `memoryCost` | Integer `8,192`–`1,048,576` | `65,536` | Argon2 memory cost in KiB. |
-| `parallelism` | Integer `1`–`16` | `4` | Number of parallel lanes. |
-| `timeCost` | Integer `1`–`10` | `3` | Number of Argon2 iterations. |
+| Property      | Type / allowed values       |      Default | Description                                                       |
+| ------------- | --------------------------- | -----------: | ----------------------------------------------------------------- |
+| `algorithm`   | `"argon2id"`                | `"argon2id"` | Password algorithm used for both hashing and verification.        |
+| `hashLength`  | Integer `16`–`64`           |         `32` | Output hash length in bytes.                                      |
+| `maxBytes`    | Integer `1`–`1,048,576`     |       `1024` | Maximum UTF-8 password size accepted by hashing and verification. |
+| `memoryCost`  | Integer `8,192`–`1,048,576` |     `65,536` | Argon2 memory cost in KiB.                                        |
+| `parallelism` | Integer `1`–`16`            |          `4` | Number of parallel lanes.                                         |
+| `timeCost`    | Integer `1`–`10`            |          `3` | Number of Argon2 iterations.                                      |
 
 ```ts
 password: {
@@ -217,12 +216,12 @@ password: {
 
 Applications with existing bcrypt hashes must select bcrypt explicitly.
 
-| Property | Type / allowed values | Default | Description |
-| --- | --- | ---: | --- |
-| `algorithm` | `"bcrypt"` | Required | Selects bcrypt for both hashing and verification. |
-| `maxBytes` | Integer `1`–`72` | `72` | Maximum UTF-8 size accepted for new passwords. |
-| `rounds` | Integer `4`–`31` | `12` | bcrypt cost factor. |
-| `verifyMaxBytes` | Integer from `maxBytes` to `1,048,576` | `72` | Maximum input accepted while verifying existing hashes. |
+| Property         | Type / allowed values                  |  Default | Description                                             |
+| ---------------- | -------------------------------------- | -------: | ------------------------------------------------------- |
+| `algorithm`      | `"bcrypt"`                             | Required | Selects bcrypt for both hashing and verification.       |
+| `maxBytes`       | Integer `1`–`72`                       |     `72` | Maximum UTF-8 size accepted for new passwords.          |
+| `rounds`         | Integer `4`–`31`                       |     `12` | bcrypt cost factor.                                     |
+| `verifyMaxBytes` | Integer from `maxBytes` to `1,048,576` |     `72` | Maximum input accepted while verifying existing hashes. |
 
 ```ts
 password: {
@@ -236,12 +235,12 @@ The package does not detect algorithms, migrate hashes, rehash passwords, or fal
 
 All time values are seconds.
 
-| Property | Type / allowed values | Default | Description |
-| --- | --- | ---: | --- |
-| `maxLifetime` | Integer from `ttl` to `31,536,000` | `2,592,000` (30 days) | Maximum session lifetime from the original login, regardless of activity. |
-| `renewInterval` | Integer `1` to `ttl - 1` | `86,400` (24 hours) | Minimum interval before sliding renewal is due. |
-| `ttl` | Integer `60`–`31,536,000` | `604,800` (7 days) | Inactivity lifetime assigned at login and renewal. |
-| `validation` | Unique array of `"agent"`, `"ip"`, `"platform"` | `["agent"]` | Client fields that must match the stored session exactly. |
+| Property        | Type / allowed values                           |               Default | Description                                                               |
+| --------------- | ----------------------------------------------- | --------------------: | ------------------------------------------------------------------------- |
+| `maxLifetime`   | Integer from `ttl` to `31,536,000`              | `2,592,000` (30 days) | Maximum session lifetime from the original login, regardless of activity. |
+| `renewInterval` | Integer `1` to `ttl - 1`                        |   `86,400` (24 hours) | Minimum interval before sliding renewal is due.                           |
+| `ttl`           | Integer `60`–`31,536,000`                       |    `604,800` (7 days) | Inactivity lifetime assigned at login and renewal.                        |
+| `validation`    | Unique array of `"agent"`, `"ip"`, `"platform"` |           `["agent"]` | Client fields that must match the stored session exactly.                 |
 
 ```ts
 session: {
@@ -254,11 +253,11 @@ session: {
 
 Validation values:
 
-| Enum | Source | Behavior |
-| --- | --- | --- |
-| `"agent"` | Complete `User-Agent` header | Enabled by default. The complete value must match. |
-| `"ip"` | Application-provided `getIp()` result | IPv4 and IPv6 are canonicalized before exact comparison. |
-| `"platform"` | `Sec-CH-UA-Platform` header | Normalized and compared exactly. |
+| Enum         | Source                                | Behavior                                                 |
+| ------------ | ------------------------------------- | -------------------------------------------------------- |
+| `"agent"`    | Complete `User-Agent` header          | Enabled by default. The complete value must match.       |
+| `"ip"`       | Application-provided `getIp()` result | IPv4 and IPv6 are canonicalized before exact comparison. |
+| `"platform"` | `Sec-CH-UA-Platform` header           | Normalized and compared exactly.                         |
 
 Every selected field is required during session creation and validation. A mismatch revokes the database session.
 
@@ -272,15 +271,15 @@ renew_at     = min((updated_at ?? created_at) + renewInterval, maxExpiresAt)
 
 ### Cookies
 
-| Property | Type / allowed values | Default | Description |
-| --- | --- | --- | --- |
-| `sessionName` | Valid cookie name | `"__ses"` | Contains the opaque token. This is the only authenticating cookie. |
-| `cacheName` | Valid cookie name | `"__cac"` | Contains the optional signed short cache. |
-| `renewName` | Valid cookie name | `"__ren"` | Contains the untrusted `renew_at` Unix timestamp. |
-| `domain` | `string` | Browser host only | Optional cookie domain. |
-| `path` | String beginning with `/` | `"/"` | Cookie path. |
-| `sameSite` | `"Strict" \| "Lax" \| "None"` | `"Lax"` | Browser SameSite policy. |
-| `secure` | `boolean` | `true` | Requires HTTPS when enabled. Set `false` only for local HTTP development. |
+| Property      | Type / allowed values         | Default           | Description                                                               |
+| ------------- | ----------------------------- | ----------------- | ------------------------------------------------------------------------- |
+| `sessionName` | Valid cookie name             | `"__ses"`         | Contains the opaque token. This is the only authenticating cookie.        |
+| `cacheName`   | Valid cookie name             | `"__cac"`         | Contains the optional signed short cache.                                 |
+| `renewName`   | Valid cookie name             | `"__ren"`         | Contains the untrusted `renew_at` Unix timestamp.                         |
+| `domain`      | `string`                      | Browser host only | Optional cookie domain.                                                   |
+| `path`        | String beginning with `/`     | `"/"`             | Cookie path.                                                              |
+| `sameSite`    | `"Strict" \| "Lax" \| "None"` | `"Lax"`           | Browser SameSite policy.                                                  |
+| `secure`      | `boolean`                     | `true`            | Requires HTTPS when enabled. Set `false` only for local HTTP development. |
 
 All three cookies are always `HttpOnly` and expire with their respective server-side purpose. Their names must be unique.
 
@@ -292,26 +291,26 @@ Cookie prefix rules are enforced:
 
 SameSite values:
 
-| Enum | Behavior |
-| --- | --- |
-| `"Strict"` | Sends cookies only in same-site contexts. |
-| `"Lax"` | Sends cookies in same-site contexts and eligible top-level safe navigations. |
-| `"None"` | Allows cross-site cookie use and requires `secure: true`. |
+| Enum       | Behavior                                                                     |
+| ---------- | ---------------------------------------------------------------------------- |
+| `"Strict"` | Sends cookies only in same-site contexts.                                    |
+| `"Lax"`    | Sends cookies in same-site contexts and eligible top-level safe navigations. |
+| `"None"`   | Allows cross-site cookie use and requires `secure: true`.                    |
 
 The resolved names are available through:
 
 ```ts
 auth.cookie.sessionName; // "__ses"
-auth.cookie.cacheName;   // "__cac"
-auth.cookie.renewName;   // "__ren"
+auth.cookie.cacheName; // "__cac"
+auth.cookie.renewName; // "__ren"
 ```
 
 ### Signed cache
 
-| Property | Type / allowed values | Default | Description |
-| --- | --- | --- | --- |
-| `cache.ttl` | Integer `1` to `session.ttl` | Disabled | Maximum cache lifetime in seconds. |
-| `secret` | String with at least 32 UTF-8 bytes | — | Signs the cache with HMAC-SHA-256. Required with `cache`. |
+| Property    | Type / allowed values               | Default  | Description                                               |
+| ----------- | ----------------------------------- | -------- | --------------------------------------------------------- |
+| `cache.ttl` | Integer `1` to `session.ttl`        | Disabled | Maximum cache lifetime in seconds.                        |
+| `secret`    | String with at least 32 UTF-8 bytes | —        | Signs the cache with HMAC-SHA-256. Required with `cache`. |
 
 The cache:
 
@@ -357,29 +356,42 @@ The cache is signed but not encrypted. Do not place passwords, password hashes, 
 ```ts
 const db = createPrismaAdapter({
     client: prisma,
-    config: {
-        account: {
-            role: ["OWNER", "ADMIN"],
-            status: ["ACTIVE"],
-        },
-        table: "account_sessions",
-        user: {
-            status: ["ACTIVE"],
-        },
-    },
+    //  config: {
+    //      session: {
+    //          table: "account_sessions",
+    //          relations: {
+    //              account: "account",
+    //              user: "user",
+    //          },
+    //      },
+    //      access: {
+    //          account: {
+    //              allowedRoles: ["OWNER", "ADMIN"],
+    //              allowedStatuses: ["ACTIVE"],
+    //          },
+    //          user: {
+    //              allowedRoles: ["ADMIN"],
+    //              allowedStatuses: ["ACTIVE"],
+    //          },
+    //      },
+    //  },
 });
 ```
 
-| Property | Type / allowed values | Required | Default | Description |
-| --- | --- | :---: | --- | --- |
-| `client` | Generated Prisma client | ✅ | — | Prisma client containing the session delegate. |
-| `config.table` | Compatible Prisma delegate name | Only without `account_sessions` | `"account_sessions"` | Model delegate used to store sessions. This is not the physical table name. |
-| `config.account.status` | Non-empty unique `string[]` | ✅ | — | Account statuses allowed to authenticate. Values come from the application enum. |
-| `config.account.role` | Non-empty unique `string[]` | ❌ | All roles | Optional account-role allowlist. Values come from the application enum. |
-| `config.user.status` | Non-empty unique `string[]` | ✅ | — | User statuses allowed to authenticate. Values come from the application enum. |
-| `config.user.role` | Non-empty unique `string[]` | ❌ | All roles | Optional user-role allowlist. Values come from the application enum. |
+| Property                                | Type / allowed values           |            Required             | Default              | Description                                                           |
+| --------------------------------------- | ------------------------------- | :-----------------------------: | -------------------- | --------------------------------------------------------------------- |
+| `client`                                | Generated Prisma client         |               ✅                | —                    | Prisma client containing the session delegate.                        |
+| `config.session`                        | Session model configuration     |               ❌                | Conventional names   | Groups the Prisma delegate and relation names.                        |
+| `config.session.table`                  | Compatible Prisma delegate name | Only without `account_sessions` | `"account_sessions"` | Delegate used to store sessions. This is not the physical table name. |
+| `config.session.relations.account`      | Non-empty `string`              |               ❌                | `"account"`          | Account relation field on the session model.                          |
+| `config.session.relations.user`         | Non-empty `string`              |               ❌                | `"user"`             | User relation field nested inside the account relation.               |
+| `config.access.account.allowedStatuses` | Non-empty unique `string[]`     |               ✅                | —                    | Account statuses allowed to authenticate.                             |
+| `config.access.account.allowedRoles`    | Non-empty unique `string[]`     |               ❌                | All roles            | Account roles allowed to authenticate.                                |
+| `config.access.user.allowedStatuses`    | Non-empty unique `string[]`     |               ✅                | —                    | User statuses allowed to authenticate.                                |
+| `config.access.user.allowedRoles`       | Non-empty unique `string[]`     |               ❌                | All roles            | User roles allowed to authenticate.                                   |
 
 Status and role values are deliberately dynamic. The package does not define application-specific enums.
+Every configured account and user condition must match. Omitting `allowedRoles` accepts every role, but both `allowedStatuses` lists remain required.
 
 ### Next.js adapter
 
@@ -391,11 +403,11 @@ export const nextAuth = createNextAuth({
 });
 ```
 
-| Property | Type / allowed values | Required | Default | Description |
-| --- | --- | :---: | --- | --- |
-| `renewUrl` | Absolute `http:` or `https:` URL | ✅ | — | Trusted private API renewal endpoint. |
-| `cookie.sessionName` | Valid cookie name | ❌ | `"__ses"` | Session cookie read and forwarded to the API. |
-| `cookie.renewName` | Valid cookie name | ❌ | `"__ren"` | Renewal scheduling cookie read by Next.js. |
+| Property             | Type / allowed values            | Required | Default   | Description                                   |
+| -------------------- | -------------------------------- | :------: | --------- | --------------------------------------------- |
+| `renewUrl`           | Absolute `http:` or `https:` URL |    ✅    | —         | Trusted private API renewal endpoint.         |
+| `cookie.sessionName` | Valid cookie name                |    ❌    | `"__ses"` | Session cookie read and forwarded to the API. |
+| `cookie.renewName`   | Valid cookie name                |    ❌    | `"__ren"` | Renewal scheduling cookie read by Next.js.    |
 
 ## Session flow
 
@@ -503,17 +515,17 @@ model account_sessions {
 
 Required fields and relation names:
 
-| Path | Required fields |
-| --- | --- |
-| Session model | `id`, `account_id`, `token_hash`, `ip`, `platform`, `agent`, `expires_at`, `revoked_at`, `created_at`, `updated_at` |
-| `account` relation | `id`, `email`, `name`, `role`, `status`, `timezone` |
-| `account.user` relation | `id`, `role`, `status` |
+| Path                    | Required fields                                                                                                     |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| Session model           | `id`, `account_id`, `token_hash`, `ip`, `platform`, `agent`, `expires_at`, `revoked_at`, `created_at`, `updated_at` |
+| `account` relation      | `id`, `email`, `name`, `role`, `status`, `timezone`                                                                 |
+| `account.user` relation | `id`, `role`, `status`                                                                                              |
 
-The relations must be named `account` and `user`. Their inverse relation names may differ. Application models may add fields, indexes, defaults, and relations. Role and status fields may use Prisma enums.
+The relation names default to `account` and `user`. Configure `session.relations` when the application uses different field names. Their inverse relation names may differ. Application models may add fields, indexes, defaults, and relations. Role and status fields may use Prisma enums.
 
 Keep `agent` large enough for the complete User-Agent. Use provider-compatible native annotations when the database is not MySQL/MariaDB.
 
-`config.table` is a Prisma client delegate name. A model named `AdminSession` mapped with `@@map("account_sessions")` normally uses the `adminSession` delegate.
+`config.session.table` is a Prisma client delegate name. A model named `AdminSession` mapped with `@@map("account_sessions")` normally uses the `adminSession` delegate.
 
 Create and run migrations through the application's Prisma workflow. The package never manages migrations.
 
@@ -564,15 +576,15 @@ Only `account_id` is persisted in the session row. Current account and user data
 
 ### Methods
 
-| Method | Purpose |
-| --- | --- |
-| `auth.createSession({ account_id, context })` | Creates the DB session and writes the browser cookies. |
-| `auth.resolveSession(context)` | Resolves a request and returns account, user, and session. |
-| `auth.renewSession(context)` | Performs DB validation, renews when due, and writes authoritative cookies. |
-| `auth.revokeSession(context)` | Revokes the current DB session and clears cookies. |
-| `auth.clearSession(context)` | Clears browser cookies without revoking the DB session. |
-| `auth.getToken(context)` | Returns the validated opaque token from the request cookie. |
-| `auth.requireSession` | Hono middleware that authenticates and populates the context. |
+| Method                                        | Purpose                                                                    |
+| --------------------------------------------- | -------------------------------------------------------------------------- |
+| `auth.createSession({ account_id, context })` | Creates the DB session and writes the browser cookies.                     |
+| `auth.resolveSession(context)`                | Resolves a request and returns account, user, and session.                 |
+| `auth.renewSession(context)`                  | Performs DB validation, renews when due, and writes authoritative cookies. |
+| `auth.revokeSession(context)`                 | Revokes the current DB session and clears cookies.                         |
+| `auth.clearSession(context)`                  | Clears browser cookies without revoking the DB session.                    |
+| `auth.getToken(context)`                      | Returns the validated opaque token from the request cookie.                |
+| `auth.requireSession`                         | Hono middleware that authenticates and populates the context.              |
 
 `requireSession` authenticates only. Application-specific route permissions remain the application's responsibility.
 
@@ -587,7 +599,6 @@ import { createHonoAdapter } from "@gauts/auth/hono";
 const core = createAuth({ db });
 const hono = createHonoAdapter({
     auth: core,
-    getIp: getTrustedClientIp,
 });
 ```
 
@@ -617,11 +628,11 @@ export const proxy = async (request: NextRequest) => {
 
 Result values:
 
-| `attempted` | `status` | Meaning |
-| :---: | ---: | --- |
-| `false` | `null` | Session token exists and renewal is not due. |
-| `false` | `401` | Session token is missing or malformed; no API request occurred. |
-| `true` | HTTP status | The renewal endpoint was called and returned this status. |
+| `attempted` |    `status` | Meaning                                                         |
+| :---------: | ----------: | --------------------------------------------------------------- |
+|   `false`   |      `null` | Session token exists and renewal is not due.                    |
+|   `false`   |       `401` | Session token is missing or malformed; no API request occurred. |
+|   `true`    | HTTP status | The renewal endpoint was called and returned this status.       |
 
 The adapter copies every returned `Set-Cookie` header to the browser response. It forwards only the session cookie and controlled client/origin headers required by the private API. Other cookies, authorization headers, and arbitrary headers are not forwarded.
 
@@ -643,15 +654,15 @@ await auth.session.revokeToken(token);
 await auth.session.revokeAccount(account_id);
 ```
 
-| Method | Behavior |
-| --- | --- |
-| `create` | Creates a session and returns the raw token once. |
-| `resolve` | Performs read-only DB authentication. |
-| `renew` | Validates through DB and updates expiry only when due. |
-| `list` | Returns active sessions without token hashes. |
-| `revoke` | Revokes one session belonging to an account. |
-| `revokeToken` | Revokes the session matching a raw token. |
-| `revokeAccount` | Revokes every active session for an account. |
+| Method          | Behavior                                               |
+| --------------- | ------------------------------------------------------ |
+| `create`        | Creates a session and returns the raw token once.      |
+| `resolve`       | Performs read-only DB authentication.                  |
+| `renew`         | Validates through DB and updates expiry only when due. |
+| `list`          | Returns active sessions without token hashes.          |
+| `revoke`        | Revokes one session belonging to an account.           |
+| `revokeToken`   | Revokes the session matching a raw token.              |
+| `revokeAccount` | Revokes every active session for an account.           |
 
 The package does not limit session count or delete historical rows. Retention and cleanup belong to the application.
 
@@ -699,15 +710,15 @@ type AuthErrorCode =
 
 Use `isAuthError(error)` before reading `error.code`.
 
-| Code | Suggested HTTP status | Meaning |
-| --- | ---: | --- |
-| `AUTH_CONFIG_INVALID` | `500` | Invalid startup configuration. |
-| `PASSWORD_INPUT_INVALID` | `400` | Password input violates configured limits. |
-| `SESSION_CLIENT_MISMATCH` | `403` | A configured client field does not match; the session is revoked. |
-| `SESSION_DATA_INVALID` | `400` | Invalid session or renewal data. |
-| `SESSION_INVALID` | `401` | Missing, expired, revoked, or unknown session. |
-| `SESSION_NOT_FOUND` | `404` | Requested session does not exist for the account. |
-| `DB_UNAVAILABLE` | `503` | Database operation failed. Authentication fails closed. |
+| Code                      | Suggested HTTP status | Meaning                                                           |
+| ------------------------- | --------------------: | ----------------------------------------------------------------- |
+| `AUTH_CONFIG_INVALID`     |                 `500` | Invalid startup configuration.                                    |
+| `PASSWORD_INPUT_INVALID`  |                 `400` | Password input violates configured limits.                        |
+| `SESSION_CLIENT_MISMATCH` |                 `403` | A configured client field does not match; the session is revoked. |
+| `SESSION_DATA_INVALID`    |                 `400` | Invalid session or renewal data.                                  |
+| `SESSION_INVALID`         |                 `401` | Missing, expired, revoked, or unknown session.                    |
+| `SESSION_NOT_FOUND`       |                 `404` | Requested session does not exist for the account.                 |
+| `DB_UNAVAILABLE`          |                 `503` | Database operation failed. Authentication fails closed.           |
 
 The package throws typed errors but does not choose application HTTP responses.
 

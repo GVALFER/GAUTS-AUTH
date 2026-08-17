@@ -111,6 +111,16 @@ const createMockAuth = (
     },
 });
 
+const withoutIpValidation = (auth: Auth): Auth => ({
+    ...auth,
+    config: {
+        session: {
+            ...auth.config.session,
+            validation: ["agent"],
+        },
+    },
+});
+
 const createApp = ({ auth, cache = false }: { auth: Auth; cache?: boolean }) => {
     const adapter = createHonoAdapter({
         auth,
@@ -165,7 +175,7 @@ const identityHeaders = {
 describe("Hono adapter", () => {
     it("exposes the resolved cookie names", () => {
         const auth = createMockAuth(async () => resolved);
-        const defaults = createHonoAdapter({ auth, getIp: () => null });
+        const defaults = createHonoAdapter({ auth: withoutIpValidation(auth) });
         const { adapter } = createApp({ auth });
 
         assert.deepEqual(defaults.cookie, {
@@ -177,6 +187,35 @@ describe("Hono adapter", () => {
             cacheName: "session-cache",
             renewName: "session-renew",
             sessionName: "session",
+        });
+    });
+
+    it("uses a null IP when getIp is omitted", async () => {
+        const auth = withoutIpValidation(createMockAuth(async () => resolved));
+        let client: unknown;
+
+        auth.session.resolve = async (input) => {
+            client = input.client;
+            return resolved;
+        };
+
+        const adapter = createHonoAdapter({ auth });
+        const app = new Hono();
+
+        app.get("/protected", adapter.requireSession, (c) => c.body(null, 204));
+
+        const response = await app.request("/protected", {
+            headers: {
+                Cookie: `__ses=${token}`,
+                ...identityHeaders,
+            },
+        });
+
+        assert.equal(response.status, 204);
+        assert.deepEqual(client, {
+            agent: "Hono Test",
+            ip: null,
+            platform: "macOS",
         });
     });
 
@@ -476,6 +515,10 @@ describe("Hono adapter", () => {
     it("validates IP, cookie, cache, and secret configuration", () => {
         const auth = createMockAuth(async () => resolved);
 
+        assert.throws(
+            () => createHonoAdapter({ auth }),
+            (error) => isAuthError(error) && error.code === "AUTH_CONFIG_INVALID",
+        );
         assert.throws(
             () => createHonoAdapter({ auth, getIp: null as never }),
             (error) => isAuthError(error) && error.code === "AUTH_CONFIG_INVALID",

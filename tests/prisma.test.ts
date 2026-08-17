@@ -54,12 +54,22 @@ const account: AuthAccount = {
   },
 };
 
-const access = {
-  account: { status: ["ACTIVE"] },
-  user: { status: ["ACTIVE"] },
+const config = {
+  access: {
+    account: { allowedStatuses: ["ACTIVE"] },
+    user: { allowedStatuses: ["ACTIVE"] },
+  },
 } as const;
 
-const createDelegate = () => {
+type CreateDelegateInput = {
+  accountRelation?: string;
+  userRelation?: string;
+};
+
+const createDelegate = ({
+  accountRelation = "account",
+  userRelation = "user",
+}: CreateDelegateInput = {}) => {
   const calls: Record<string, unknown> = {};
   const delegate: Delegate<SessionRecord> = {
     [meta]: null as never,
@@ -77,7 +87,15 @@ const createDelegate = () => {
     },
     findUnique: async (args) => {
       calls.findUnique = args;
-      return { ...row, account };
+      const { user, ...accountData } = account;
+
+      return {
+        ...row,
+        [accountRelation]: {
+          ...accountData,
+          [userRelation]: user,
+        },
+      };
     },
     update: async (args) => {
       calls.update = args;
@@ -113,26 +131,37 @@ const assertTypes = () => {
 
   const defaultInput = {
     client,
-    config: access,
+    config,
   } satisfies PrismaAdapterInput<typeof client>;
   void defaultInput;
 
   const appSpecificInput = {
     client,
     config: {
-      account: { role: ["MANAGER"], status: ["INVITED"] },
-      user: { role: ["OPERATOR"], status: ["VERIFIED"] },
+      access: {
+        account: {
+          allowedRoles: ["MANAGER"],
+          allowedStatuses: ["INVITED"],
+        },
+        user: {
+          allowedRoles: ["OPERATOR"],
+          allowedStatuses: ["VERIFIED"],
+        },
+      },
     },
   } satisfies PrismaAdapterInput<typeof client>;
   void appSpecificInput;
 
   const customInput = {
     client: custom,
-    config: { ...access, table: "admin_sessions" },
+    config: {
+      ...config,
+      session: { table: "admin_sessions" },
+    },
   } satisfies PrismaAdapterInput<typeof custom>;
   void customInput;
 
-  // @ts-expect-error config.table is required without account_sessions.
+  // @ts-expect-error config.session.table is required without account_sessions.
   const missingConfig = { client: custom } satisfies PrismaAdapterInput<
     typeof custom
   >;
@@ -152,7 +181,7 @@ describe("Prisma database adapter", () => {
     const { calls, delegate } = createDelegate();
     const db = createPrismaAdapter({
       client: { account_sessions: delegate },
-      config: access,
+      config,
     });
 
     await db.create({
@@ -246,10 +275,15 @@ describe("Prisma database adapter", () => {
     const db = createPrismaAdapter({
       client: { account_sessions: delegate },
       config: {
-        account: { status: ["ACTIVE", "PENDING"] },
-        user: {
-          role: ["ADMIN"],
-          status: ["ACTIVE", "PENDING"],
+        access: {
+          account: {
+            allowedRoles: ["OWNER"],
+            allowedStatuses: ["ACTIVE", "PENDING"],
+          },
+          user: {
+            allowedRoles: ["ADMIN"],
+            allowedStatuses: ["ACTIVE", "PENDING"],
+          },
         },
       },
     });
@@ -261,7 +295,10 @@ describe("Prisma database adapter", () => {
     const { delegate } = createDelegate();
     const db = createPrismaAdapter({
       client: { admin_sessions: delegate },
-      config: { ...access, table: "admin_sessions" },
+      config: {
+        ...config,
+        session: { table: "admin_sessions" },
+      },
     });
 
     assert.deepEqual(
@@ -270,12 +307,78 @@ describe("Prisma database adapter", () => {
     );
   });
 
+  it("uses configured account and user relation names", async () => {
+    const { calls, delegate } = createDelegate({
+      accountRelation: "owner",
+      userRelation: "identity",
+    });
+    const db = createPrismaAdapter({
+      client: { account_sessions: delegate },
+      config: {
+        access: {
+          account: {
+            allowedRoles: ["OWNER"],
+            allowedStatuses: ["PENDING"],
+          },
+          user: {
+            allowedRoles: ["ADMIN"],
+            allowedStatuses: ["PENDING"],
+          },
+        },
+        session: {
+          relations: {
+            account: "owner",
+            user: "identity",
+          },
+        },
+      },
+    });
+
+    assert.deepEqual(await db.findToken(row.token_hash), {
+      ...row,
+      account,
+      allowed: true,
+    });
+    assert.deepEqual(calls.findUnique, {
+      select: {
+        account_id: true,
+        agent: true,
+        created_at: true,
+        expires_at: true,
+        id: true,
+        ip: true,
+        platform: true,
+        revoked_at: true,
+        token_hash: true,
+        updated_at: true,
+        owner: {
+          select: {
+            email: true,
+            id: true,
+            name: true,
+            role: true,
+            status: true,
+            timezone: true,
+            identity: {
+              select: {
+                id: true,
+                role: true,
+                status: true,
+              },
+            },
+          },
+        },
+      },
+      where: { token_hash: row.token_hash },
+    });
+  });
+
   it("rejects an invalid runtime model", () => {
     assert.throws(
       () =>
         createPrismaAdapter({
           client: { account_sessions: {} as Delegate<SessionRecord> },
-          config: access,
+          config,
         }),
       (error) => isAuthError(error) && error.code === "AUTH_CONFIG_INVALID",
     );
@@ -296,8 +399,10 @@ describe("Prisma database adapter", () => {
         createPrismaAdapter({
           client: { account_sessions: delegate },
           config: {
-            account: { status: [] },
-            user: { status: ["ACTIVE"] },
+            access: {
+              account: { allowedStatuses: [] },
+              user: { allowedStatuses: ["ACTIVE"] },
+            },
           },
         }),
       (error) => isAuthError(error) && error.code === "AUTH_CONFIG_INVALID",
@@ -308,9 +413,25 @@ describe("Prisma database adapter", () => {
         createPrismaAdapter({
           client: { account_sessions: delegate },
           config: {
-            account: { status: ["ACTIVE"] },
-            // @ts-expect-error user.status is required.
-            user: { role: ["ANY_ROLE"] },
+            access: {
+              account: { allowedStatuses: ["ACTIVE"] },
+              // @ts-expect-error user.allowedStatuses is required.
+              user: { allowedRoles: ["ANY_ROLE"] },
+            },
+          },
+        }),
+      (error) => isAuthError(error) && error.code === "AUTH_CONFIG_INVALID",
+    );
+
+    assert.throws(
+      () =>
+        createPrismaAdapter({
+          client: { account_sessions: delegate },
+          config: {
+            ...config,
+            session: {
+              relations: { account: "" },
+            },
           },
         }),
       (error) => isAuthError(error) && error.code === "AUTH_CONFIG_INVALID",

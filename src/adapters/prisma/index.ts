@@ -26,18 +26,27 @@ export type PrismaSessionTable<Client> = {
 }[keyof Client] &
     string;
 
-export type PrismaAccessConfig = {
-    role?: readonly string[];
-    status: readonly string[];
+export type PrismaAccessRules = {
+    allowedRoles?: readonly string[];
+    allowedStatuses: readonly string[];
 };
 
-type PrismaAuthConfig = {
-    account: PrismaAccessConfig;
-    user: PrismaAccessConfig;
+export type PrismaRelationsConfig = {
+    account?: string;
+    user?: string;
 };
 
-export type PrismaAdapterConfig<Client> = PrismaAuthConfig & {
+export type PrismaSessionConfig<Client> = {
+    relations?: PrismaRelationsConfig;
     table?: PrismaSessionTable<Client>;
+};
+
+export type PrismaAdapterConfig<Client> = {
+    access: {
+        account: PrismaAccessRules;
+        user: PrismaAccessRules;
+    };
+    session?: PrismaSessionConfig<Client>;
 };
 
 type DefaultPrismaAdapterInput<Client extends object> = {
@@ -48,7 +57,9 @@ type DefaultPrismaAdapterInput<Client extends object> = {
 type CustomPrismaAdapterInput<Client extends object> = {
     client: Client;
     config: PrismaAdapterConfig<Client> & {
-        table: PrismaSessionTable<Client>;
+        session: PrismaSessionConfig<Client> & {
+            table: PrismaSessionTable<Client>;
+        };
     };
 };
 
@@ -67,8 +78,8 @@ type Delegate = {
 };
 
 type ResolvedAccess = {
-    role: readonly string[] | null;
-    status: readonly string[];
+    roles: readonly string[] | null;
+    statuses: readonly string[];
 };
 
 type AccessRules = {
@@ -79,6 +90,23 @@ type AccessRules = {
 type ResolveValuesInput = {
     input: unknown;
     name: string;
+};
+
+type Relations = {
+    account: string;
+    user: string;
+};
+
+type ResolvedConfig = {
+    access: AccessRules;
+    relations: Relations;
+    table: string;
+};
+
+type RequireAuthRowInput = {
+    access: AccessRules;
+    relations: Relations;
+    value: unknown;
 };
 
 const select = {
@@ -92,27 +120,6 @@ const select = {
     revoked_at: true,
     token_hash: true,
     updated_at: true,
-} as const;
-
-const authSelect = {
-    ...select,
-    account: {
-        select: {
-            email: true,
-            id: true,
-            name: true,
-            role: true,
-            status: true,
-            timezone: true,
-            user: {
-                select: {
-                    id: true,
-                    role: true,
-                    status: true,
-                },
-            },
-        },
-    },
 } as const;
 
 const isNullableDate = (value: unknown): value is Date | null => {
@@ -166,7 +173,12 @@ const resolveValues = ({ input, name }: ResolveValuesInput): readonly string[] =
 };
 
 const resolveAccess = (config: unknown): AccessRules => {
-    if (!isRecord(config) || !isRecord(config.account) || !isRecord(config.user)) {
+    if (
+        !isRecord(config) ||
+        !isRecord(config.access) ||
+        !isRecord(config.access.account) ||
+        !isRecord(config.access.user)
+    ) {
         throw createError({
             code: "AUTH_CONFIG_INVALID",
             message: "Prisma account and user access rules are required.",
@@ -175,47 +187,135 @@ const resolveAccess = (config: unknown): AccessRules => {
 
     return {
         account: {
-            role:
-                config.account.role === undefined
+            roles:
+                config.access.account.allowedRoles === undefined
                     ? null
-                    : resolveValues({ input: config.account.role, name: "account.role" }),
-            status: resolveValues({ input: config.account.status, name: "account.status" }),
+                    : resolveValues({
+                          input: config.access.account.allowedRoles,
+                          name: "access.account.allowedRoles",
+                      }),
+            statuses: resolveValues({
+                input: config.access.account.allowedStatuses,
+                name: "access.account.allowedStatuses",
+            }),
         },
         user: {
-            role:
-                config.user.role === undefined
+            roles:
+                config.access.user.allowedRoles === undefined
                     ? null
-                    : resolveValues({ input: config.user.role, name: "user.role" }),
-            status: resolveValues({ input: config.user.status, name: "user.status" }),
+                    : resolveValues({
+                          input: config.access.user.allowedRoles,
+                          name: "access.user.allowedRoles",
+                      }),
+            statuses: resolveValues({
+                input: config.access.user.allowedStatuses,
+                name: "access.user.allowedStatuses",
+            }),
         },
     };
 };
 
-const resolveTable = (config: unknown): string => {
-    if (!isRecord(config) || config.table === undefined) {
-        return DEFAULT_TABLE;
-    }
-
-    if (typeof config.table !== "string" || !config.table) {
+const resolveName = ({ input, name }: ResolveValuesInput): string => {
+    if (typeof input !== "string" || !input) {
         throw createError({
             code: "AUTH_CONFIG_INVALID",
-            message: "Prisma session table name is invalid.",
+            message: `${name} must be a non-empty string.`,
         });
     }
 
-    return config.table;
+    return input;
+};
+
+const resolveConfig = (config: unknown): ResolvedConfig => {
+    if (!isRecord(config)) {
+        throw createError({
+            code: "AUTH_CONFIG_INVALID",
+            message: "Prisma configuration is required.",
+        });
+    }
+
+    if (config.session !== undefined && !isRecord(config.session)) {
+        throw createError({
+            code: "AUTH_CONFIG_INVALID",
+            message: "Prisma session configuration is invalid.",
+        });
+    }
+
+    const session = isRecord(config.session) ? config.session : {};
+
+    if (session.relations !== undefined && !isRecord(session.relations)) {
+        throw createError({
+            code: "AUTH_CONFIG_INVALID",
+            message: "Prisma session relations are invalid.",
+        });
+    }
+
+    const relations = isRecord(session.relations) ? session.relations : {};
+
+    return {
+        access: resolveAccess(config),
+        relations: {
+            account:
+                relations.account === undefined
+                    ? "account"
+                    : resolveName({
+                          input: relations.account,
+                          name: "session.relations.account",
+                      }),
+            user:
+                relations.user === undefined
+                    ? "user"
+                    : resolveName({ input: relations.user, name: "session.relations.user" }),
+        },
+        table:
+            session.table === undefined
+                ? DEFAULT_TABLE
+                : resolveName({ input: session.table, name: "session.table" }),
+    };
 };
 
 const matchesAccess = (value: { role: string; status: string }, rule: ResolvedAccess) => {
-    return rule.status.includes(value.status) && (!rule.role || rule.role.includes(value.role));
+    return rule.statuses.includes(value.status) && (!rule.roles || rule.roles.includes(value.role));
 };
+
+const createAuthSelect = (relations: Relations) => ({
+    ...select,
+    [relations.account]: {
+        select: {
+            email: true,
+            id: true,
+            name: true,
+            role: true,
+            status: true,
+            timezone: true,
+            [relations.user]: {
+                select: {
+                    id: true,
+                    role: true,
+                    status: true,
+                },
+            },
+        },
+    },
+});
 
 const requireRow = (value: unknown): SessionRecord => {
     if (!isSessionRecord(value)) {
         throw new Error("Prisma session table returned invalid data.");
     }
 
-    return value;
+    return {
+        account_id: value.account_id,
+        agent: value.agent,
+        created_at: value.created_at,
+        expires_at: value.expires_at,
+        id: value.id,
+        ip: value.ip,
+        platform: value.platform,
+        revoked_at: value.revoked_at,
+        token_hash: value.token_hash,
+        updated_at: value.updated_at,
+    };
 };
 
 const requireRows = (value: unknown): SessionRecord[] => {
@@ -226,19 +326,37 @@ const requireRows = (value: unknown): SessionRecord[] => {
     return value.map(requireRow);
 };
 
-const requireAuthRow = (value: unknown, access: AccessRules): AuthSessionRecord => {
+const requireAuthRow = ({ access, relations, value }: RequireAuthRowInput): AuthSessionRecord => {
     const row = requireRow(value);
 
-    if (!isRecord(value) || !isAuthAccount(value.account)) {
+    if (!isRecord(value)) {
+        throw new Error("Prisma account relation returned invalid data.");
+    }
+
+    const relation = value[relations.account];
+
+    if (!isRecord(relation)) {
+        throw new Error("Prisma account relation returned invalid data.");
+    }
+
+    const account = {
+        email: relation.email,
+        id: relation.id,
+        name: relation.name,
+        role: relation.role,
+        status: relation.status,
+        timezone: relation.timezone,
+        user: relation[relations.user],
+    };
+
+    if (!isAuthAccount(account)) {
         throw new Error("Prisma account relation returned invalid data.");
     }
 
     return {
         ...row,
-        account: value.account,
-        allowed:
-            matchesAccess(value.account, access.account) &&
-            matchesAccess(value.account.user, access.user),
+        account,
+        allowed: matchesAccess(account, access.account) && matchesAccess(account.user, access.user),
     };
 };
 
@@ -246,9 +364,10 @@ export const createPrismaAdapter = <Client extends object>(
     input: PrismaAdapterInput<Client>,
 ): DbAdapter => {
     const config: unknown = input.config;
-    const table_name = resolveTable(config);
+    const resolved = resolveConfig(config);
+    const table_name = resolved.table;
     const table = isRecord(input.client) ? input.client[table_name] : undefined;
-    const access = resolveAccess(config);
+    const authSelect = createAuthSelect(resolved.relations);
 
     if (!isDelegate(table)) {
         throw createError({
@@ -294,7 +413,13 @@ export const createPrismaAdapter = <Client extends object>(
                 where: { token_hash },
             });
 
-            return row === null ? null : requireAuthRow(row, access);
+            return row === null
+                ? null
+                : requireAuthRow({
+                      access: resolved.access,
+                      relations: resolved.relations,
+                      value: row,
+                  });
         },
 
         revoke: async ({ revoked_at, session_ids }) => {

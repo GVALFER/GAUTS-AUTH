@@ -27,7 +27,6 @@ describe("auth configuration", () => {
         const auth = createHonoAuth({
             cache: { ttl: 60 },
             db,
-            getIp: () => null,
             secret: "s".repeat(32),
         });
 

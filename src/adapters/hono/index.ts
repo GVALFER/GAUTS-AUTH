@@ -52,13 +52,13 @@ export type HonoAdapterConfig = {
     auth: Auth;
     cache?: SessionCacheConfig;
     cookie?: HonoCookieConfig;
-    getIp: HonoGetIp;
+    getIp?: HonoGetIp;
     secret?: string;
 };
 
 type HonoAuthBase = AuthDeps & {
     cookie?: HonoCookieConfig;
-    getIp: HonoGetIp;
+    getIp?: HonoGetIp;
 };
 
 export type HonoAuthConfig = HonoAuthBase & HonoCacheOptions;
@@ -150,10 +150,17 @@ export const createHonoAdapter = ({
     getIp,
     secret,
 }: HonoAdapterConfig): HonoAdapter => {
-    if (typeof getIp !== "function") {
+    if (getIp !== undefined && typeof getIp !== "function") {
         throw createError({
             code: "AUTH_CONFIG_INVALID",
             message: "Hono getIp must be a function.",
+        });
+    }
+
+    if (auth.config.session.validation.includes("ip") && !getIp) {
+        throw createError({
+            code: "AUTH_CONFIG_INVALID",
+            message: "Hono getIp is required when session validation includes ip.",
         });
     }
 
@@ -177,7 +184,7 @@ export const createHonoAdapter = ({
 
     const getSessionClient = async (c: Context): Promise<SessionClientInput> => ({
         agent: c.req.header("user-agent") ?? null,
-        ip: (await getIp(c)) ?? null,
+        ip: getIp ? ((await getIp(c)) ?? null) : null,
         platform: c.req.header("sec-ch-ua-platform") ?? null,
     });
 
@@ -389,9 +396,9 @@ export const createHonoAuth = ({
         ...auth,
         ...createHonoAdapter({
             auth,
-            getIp,
             ...(cache === undefined ? {} : { cache }),
             ...(cookie === undefined ? {} : { cookie }),
+            ...(getIp === undefined ? {} : { getIp }),
             ...(secret === undefined ? {} : { secret }),
         }),
     };
