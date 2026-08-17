@@ -1,6 +1,6 @@
 {
     "name": "@gauts/auth",
-    "version": "0.6.2",
+    "version": "0.6.3",
     "description": "Framework-agnostic password and server-side session authentication for Node.js.",
     "license": "MIT",
     "author": "GVALFER",
