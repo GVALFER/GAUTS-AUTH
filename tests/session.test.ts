@@ -98,7 +98,6 @@ const createHarness = (validation: readonly SessionValidation[] = ["agent"]) => 
     const db = createDb();
     const session = createSessionService({
         config: resolveSessionConfig({
-            max: 2,
             renewInterval: 60,
             ttl: 300,
             validation,
@@ -244,6 +243,40 @@ describe("session service", () => {
         );
     });
 
+    it("rejects creation when a configured client field is missing", async () => {
+        const harness = createHarness(["ip", "agent"]);
+
+        await assert.rejects(
+            harness.session.create({
+                account_id: account.id,
+                client: { agent: client.agent },
+            }),
+            (error) => isAuthError(error) && error.code === "SESSION_DATA_INVALID",
+        );
+        assert.equal(harness.db.calls.create, 0);
+    });
+
+    it("revokes an existing session when a configured field is missing", async () => {
+        const harness = createHarness(["ip", "agent"]);
+        const created = await harness.session.create({
+            account_id: account.id,
+            client,
+        });
+        const row = harness.db.rows.get(created.session.id);
+
+        assert.ok(row);
+        harness.db.rows.set(row.id, { ...row, ip: null });
+
+        await assert.rejects(
+            harness.session.resolve({
+                client: { ...client, ip: null },
+                token: created.token,
+            }),
+            (error) => isAuthError(error) && error.code === "SESSION_CLIENT_MISMATCH",
+        );
+        assert.ok(harness.db.rows.get(created.session.id)?.revoked_at);
+    });
+
     it("lists and revokes active database sessions", async () => {
         const harness = createHarness();
         const first = await harness.session.create({
@@ -267,18 +300,6 @@ describe("session service", () => {
             second.session.id,
         ]);
         assert.equal((await harness.session.list("account-1")).length, 0);
-    });
-
-    it("enforces the active-session limit", async () => {
-        const harness = createHarness();
-        const input = { account_id: account.id, client };
-
-        await harness.session.create(input);
-        await harness.session.create(input);
-        await assert.rejects(
-            harness.session.create(input),
-            (error) => isAuthError(error) && error.code === "SESSION_LIMIT_REACHED",
-        );
     });
 
     it("does not query the database for malformed tokens", async () => {
@@ -320,7 +341,7 @@ describe("session service", () => {
 
     it("fails explicitly when the database is unavailable", async () => {
         const harness = createHarness();
-        harness.db.adapter.findActive = () => Promise.reject(new Error("offline"));
+        harness.db.adapter.create = () => Promise.reject(new Error("offline"));
 
         await assert.rejects(
             harness.session.create({ account_id: account.id, client }),

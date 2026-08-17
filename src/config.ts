@@ -21,7 +21,6 @@ export type PasswordConfig = Argon2idConfig | BcryptConfig;
 export type SessionValidation = "agent" | "ip" | "platform";
 
 export type SessionConfig = {
-    max?: number;
     renewInterval?: number;
     ttl?: number;
     validation?: readonly SessionValidation[];
@@ -46,7 +45,6 @@ type ResolvedBcryptConfig = {
 export type ResolvedPasswordConfig = ResolvedArgon2idConfig | ResolvedBcryptConfig;
 
 export type ResolvedSessionConfig = {
-    max: number;
     renewInterval: number;
     ttl: number;
     validation: readonly SessionValidation[];
@@ -76,7 +74,6 @@ const BCRYPT_DEFAULTS = {
 } as const;
 
 const SESSION_DEFAULTS = {
-    max: 10,
     renewInterval: 60 * 60 * 24,
     ttl: 60 * 60 * 24 * 7,
     validation: ["agent"],
@@ -236,12 +233,6 @@ export const resolveSessionConfig = (config: SessionConfig = {}): ResolvedSessio
     });
 
     return {
-        max: requireInteger({
-            max: 10_000,
-            min: 1,
-            name: "session.max",
-            value: resolved.max,
-        }),
         renewInterval,
         ttl,
         validation: resolveSessionValidation(config.validation ?? SESSION_DEFAULTS.validation),

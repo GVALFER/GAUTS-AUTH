@@ -3,7 +3,7 @@ import { describe, it } from "node:test";
 
 import { NextRequest, NextResponse } from "next/server.js";
 
-import { createNextAuth } from "../src/adapters/next/index.js";
+import { createNextAuth, FORWARD_HEADERS } from "../src/adapters/next/index.js";
 import { isAuthError } from "../src/errors.js";
 import { createSessionCookie } from "../src/session/cookie.js";
 
@@ -13,11 +13,34 @@ const createRequest = (renew_at: Date) => {
     const cookie = createSessionCookie({ renew_at, token });
 
     return new NextRequest("https://admin.example.com/account", {
-        headers: { Cookie: `session=${cookie}` },
+        headers: {
+            Authorization: "Bearer private",
+            Cookie: `other=private; session=${cookie}`,
+            "CF-Connecting-IP": "192.0.2.10",
+            "User-Agent": "Next Test",
+            "X-Private-Header": "private",
+        },
     });
 };
 
 describe("Next adapter", () => {
+    it("exports the controlled forwarding headers", () => {
+        assert.deepEqual(FORWARD_HEADERS, [
+            "cf-connecting-ip",
+            "origin",
+            "referer",
+            "sec-ch-ua-platform",
+            "sec-fetch-dest",
+            "sec-fetch-mode",
+            "sec-fetch-site",
+            "sec-fetch-user",
+            "true-client-ip",
+            "user-agent",
+            "x-forwarded-for",
+            "x-real-ip",
+        ]);
+    });
+
     it("does not call the renewal endpoint before renewAt", async () => {
         const originalFetch = globalThis.fetch;
         let calls = 0;
@@ -73,7 +96,16 @@ describe("Next adapter", () => {
             assert.equal(result.status, 204);
             assert.equal(request, "https://api.example.com/auth/renew");
             assert.equal(init?.method, "POST");
-            assert.match(new Headers(init?.headers).get("cookie") ?? "", /^session=/);
+            assert.equal(init?.redirect, "error");
+            assert.ok(init?.signal instanceof AbortSignal);
+
+            const headers = new Headers(init?.headers);
+            assert.match(headers.get("cookie") ?? "", /^session=/);
+            assert.equal(headers.get("cookie")?.includes("other=private"), false);
+            assert.equal(headers.get("authorization"), null);
+            assert.equal(headers.get("x-private-header"), null);
+            assert.equal(headers.get("cf-connecting-ip"), "192.0.2.10");
+            assert.equal(headers.get("user-agent"), "Next Test");
             assert.equal(
                 result.response.headers.get("set-cookie"),
                 "session=updated; Path=/; HttpOnly",

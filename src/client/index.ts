@@ -19,6 +19,11 @@ type MatchesClientProps = {
     validation: readonly SessionValidation[];
 };
 
+type HasClientFieldsProps = {
+    client: SessionClient;
+    validation: readonly SessionValidation[];
+};
+
 export const normalizeIp = (input?: string | null): string | null => {
     let value = input?.trim();
 
@@ -66,6 +71,14 @@ export const normalizeClient = (input: SessionClientInput): SessionClient => ({
     platform: normalizePlatform(input.platform),
 });
 
+export const hasClientFields = ({ client, validation }: HasClientFieldsProps): boolean => {
+    return validation.every((field) => client[field] !== null);
+};
+
 export const matchesClient = ({ current, stored, validation }: MatchesClientProps): boolean => {
-    return validation.every((field) => stored[field] === current[field]);
+    return (
+        hasClientFields({ client: current, validation }) &&
+        hasClientFields({ client: stored, validation }) &&
+        validation.every((field) => stored[field] === current[field])
+    );
 };

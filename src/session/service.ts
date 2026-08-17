@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 
-import { matchesClient, normalizeClient } from "../client/index.js";
+import { hasClientFields, matchesClient, normalizeClient } from "../client/index.js";
 import type { ResolvedSessionConfig } from "../config.js";
 import { createError, isAuthError } from "../errors.js";
 import { createToken, hashToken, tokenPattern } from "./token.js";
@@ -157,16 +157,15 @@ export const createSessionService = ({
                 });
             }
 
-            const active = await getActive(input.account_id);
+            const client = normalizeClient(input.client);
 
-            if (active.length >= config.max) {
+            if (!hasClientFields({ client, validation: config.validation })) {
                 throw createError({
-                    code: "SESSION_LIMIT_REACHED",
-                    message: `Maximum active sessions reached (${String(config.max)}).`,
+                    code: "SESSION_DATA_INVALID",
+                    message: "Configured session client fields are required.",
                 });
             }
 
-            const client = normalizeClient(input.client);
             const created_at = now();
             const expires_at = new Date(created_at.getTime() + config.ttl * 1000);
             const token = createToken();
@@ -199,9 +198,7 @@ export const createSessionService = ({
             const stored = await runDb(() => db.findToken(row.token_hash));
 
             if (!stored?.allowed) {
-                await runDb(() =>
-                    db.revoke({ revoked_at: created_at, session_ids: [row.id] }),
-                );
+                await runDb(() => db.revoke({ revoked_at: created_at, session_ids: [row.id] }));
 
                 throw createError({
                     code: "SESSION_INVALID",

@@ -26,6 +26,29 @@ export type NextAuth = {
     renew(input: NextRenewInput): Promise<NextRenewResult>;
 };
 
+type ForwardHeadersInput = {
+    cookie: string;
+    name: string;
+    request: NextRequest;
+};
+
+const RENEW_TIMEOUT = 5_000;
+
+export const FORWARD_HEADERS = [
+    "cf-connecting-ip",
+    "origin",
+    "referer",
+    "sec-ch-ua-platform",
+    "sec-fetch-dest",
+    "sec-fetch-mode",
+    "sec-fetch-site",
+    "sec-fetch-user",
+    "true-client-ip",
+    "user-agent",
+    "x-forwarded-for",
+    "x-real-ip",
+] as const;
+
 const getSetCookies = (headers: Headers): string[] => {
     const cookieHeaders = headers as Headers & {
         getSetCookie?: () => string[];
@@ -39,13 +62,16 @@ const getSetCookies = (headers: Headers): string[] => {
     return cookie ? [cookie] : [];
 };
 
-const getForwardHeaders = (request: NextRequest): Headers => {
-    const headers = new Headers(request.headers);
+const getForwardHeaders = ({ cookie, name, request }: ForwardHeadersInput): Headers => {
+    const headers = new Headers({ cookie: `${name}=${cookie}` });
 
-    headers.delete("connection");
-    headers.delete("content-length");
-    headers.delete("host");
-    headers.delete("transfer-encoding");
+    for (const header of FORWARD_HEADERS) {
+        const value = request.headers.get(header);
+
+        if (value !== null) {
+            headers.set(header, value);
+        }
+    }
 
     return headers;
 };
@@ -73,9 +99,10 @@ export const createNextAuth = ({ cookie, renewUrl }: NextAuthConfig): NextAuth =
 
     return {
         renew: async ({ request, response }) => {
-            const session = parseSessionCookie(request.cookies.get(name)?.value);
+            const cookieValue = request.cookies.get(name)?.value;
+            const session = parseSessionCookie(cookieValue);
 
-            if (!session) {
+            if (!session || !cookieValue) {
                 return {
                     attempted: false,
                     response,
@@ -93,8 +120,10 @@ export const createNextAuth = ({ cookie, renewUrl }: NextAuthConfig): NextAuth =
 
             const renewal = await fetch(url.toString(), {
                 cache: "no-store",
-                headers: getForwardHeaders(request),
+                headers: getForwardHeaders({ cookie: cookieValue, name, request }),
                 method: "POST",
+                redirect: "error",
+                signal: AbortSignal.timeout(RENEW_TIMEOUT),
             });
 
             for (const value of getSetCookies(renewal.headers)) {

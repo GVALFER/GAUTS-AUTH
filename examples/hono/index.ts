@@ -19,6 +19,9 @@ type ExampleDeps = {
     getIp: (c: Context) => Promise<string | null | undefined> | string | null | undefined;
 };
 
+const DUMMY_PASSWORD_HASH =
+    "$argon2id$v=19$m=65536,p=4,t=3$PUotpfVXonc0VRFuV1pKZQ$oxxA8DMvGRTSbZvh2Dkokeyih9sbKeodWYROqVxP9BI";
+
 export const createApp = ({ db, findAccount, getIp }: ExampleDeps) => {
     const auth = createHonoAuth({
         db,
@@ -45,13 +48,12 @@ export const createApp = ({ db, findAccount, getIp }: ExampleDeps) => {
 
         const account = await findAccount(body.email);
 
-        if (
-            !account ||
-            !(await auth.password.verify({
-                password: body.password,
-                storedHash: account.passwordHash,
-            }))
-        ) {
+        const passwordValid = await auth.password.verify({
+            password: body.password,
+            storedHash: account?.passwordHash ?? DUMMY_PASSWORD_HASH,
+        });
+
+        if (!account || !passwordValid) {
             return c.json({ error: "Invalid credentials." }, 401);
         }
 

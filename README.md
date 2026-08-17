@@ -262,20 +262,21 @@ type Session = {
 The application owns input validation, credential lookup, rate limiting, and error responses. The adapter access rules validate current account and user status/role before the session is accepted.
 
 ```ts
+const DUMMY_PASSWORD_HASH =
+    "$argon2id$v=19$m=65536,p=4,t=3$PUotpfVXonc0VRFuV1pKZQ$oxxA8DMvGRTSbZvh2Dkokeyih9sbKeodWYROqVxP9BI";
+
 app.post("/auth/login", async (c) => {
     const body = await c.req.json<{
         email: string;
         password: string;
     }>();
     const account = await findAccount(body.email);
+    const passwordValid = await auth.password.verify({
+        password: body.password,
+        storedHash: account?.passwordHash ?? DUMMY_PASSWORD_HASH,
+    });
 
-    if (
-        !account ||
-        !(await auth.password.verify({
-            password: body.password,
-            storedHash: account.passwordHash,
-        }))
-    ) {
+    if (!account || !passwordValid) {
         return c.json({ error: "Invalid credentials." }, 401);
     }
 
@@ -294,6 +295,8 @@ app.post("/auth/login", async (c) => {
     });
 });
 ```
+
+The dummy hash ensures that unknown accounts still perform the configured password verification. Precompute it once with the same algorithm and cost as the application; never generate it inside the request handler. Keep the response identical for unknown accounts and invalid passwords.
 
 Only `account_id` is persisted by the session. Email, roles, statuses, password hashes, and other dynamic account data never enter the session table.
 
@@ -350,6 +353,12 @@ export const nextAuth = createNextAuth({
 });
 ```
 
+The controlled header list is also exported for application fetchers that need to follow the same forwarding policy:
+
+```ts
+import { FORWARD_HEADERS } from "@gauts/auth/next";
+```
+
 Use it in `proxy.ts` before returning the browser-facing response:
 
 ```ts
@@ -383,7 +392,7 @@ Result semantics:
 | `false` | `401` | Cookie is missing or malformed. No API call occurred. |
 | `true` | HTTP status | `/auth/renew` was called and its `Set-Cookie` headers were copied. |
 
-The adapter forwards the incoming request headers except hop-by-hop/host headers. `renewUrl` must point to the application's trusted private API.
+The adapter forwards only the session cookie and the client/origin headers required for session and CSRF validation. Other cookies, `Authorization`, and arbitrary request headers are never forwarded. Renewal rejects redirects and times out after five seconds. `renewUrl` must point to the application's trusted private API.
 
 Protected API endpoints remain responsible for real authentication. A well-formed cookie can still reference an expired or revoked database session.
 
@@ -429,7 +438,6 @@ The selected algorithm is used for both hashing and verification. The package ne
 
 ```ts
 session: {
-    max: 10,
     renewInterval: 24 * 60 * 60,
     ttl: 7 * 24 * 60 * 60,
     validation: ["agent"],
@@ -440,7 +448,6 @@ Time values are seconds.
 
 | Property | Default | Allowed | Purpose |
 | --- | ---: | ---: | --- |
-| `max` | `10` | `1` to `10,000` | Maximum active sessions per account. |
 | `renewInterval` | `86,400` | `1` to `ttl - 1` | Minimum interval before renewal is due. |
 | `ttl` | `604,800` | `60` to `31,536,000` | Sliding inactivity lifetime. |
 | `validation` | `["agent"]` | Unique `agent`, `ip`, `platform` fields | Exact client fields compared on every validation. |
@@ -493,6 +500,7 @@ type SessionClientInput = {
 - Platform comes from `Sec-CH-UA-Platform`, is normalized, and is limited to 255 characters.
 - User-Agent comes from `User-Agent` and is stored in full.
 - No GeoIP, DNS, country, or external lookup is performed.
+- Every field selected in `session.validation` is required during creation and validation. Missing or invalid configured fields never match.
 
 ## Database adapter
 
@@ -587,6 +595,7 @@ await auth.session.revokeAccount(account_id);
 - `renew` validates and updates expiry only when due.
 - `list` returns active, non-expired sessions without token hashes.
 - revocation retains database history through `revoked_at`.
+- the package does not limit session count or delete historical rows; retention and cleanup belong to the application.
 
 ## Performance and cache policy
 
@@ -611,7 +620,6 @@ type AuthErrorCode =
     | "SESSION_CLIENT_MISMATCH"
     | "SESSION_DATA_INVALID"
     | "SESSION_INVALID"
-    | "SESSION_LIMIT_REACHED"
     | "SESSION_NOT_FOUND"
     | "DB_UNAVAILABLE";
 ```
@@ -627,7 +635,6 @@ The package does not choose HTTP responses. A typical application mapping is:
 | `SESSION_CLIENT_MISMATCH` | `403` |
 | `SESSION_DATA_INVALID` | `400` |
 | `SESSION_INVALID` | `401` |
-| `SESSION_LIMIT_REACHED` | `403` |
 | `SESSION_NOT_FOUND` | `404` |
 | `DB_UNAVAILABLE` | `503` |
 
@@ -640,6 +647,7 @@ The package provides session primitives, not a complete application security pol
 - TLS and trusted-proxy configuration;
 - CSRF, CORS, and origin validation;
 - login and renewal rate limiting;
+- equivalent password verification work for unknown accounts;
 - account status and authorization rules;
 - re-authentication for sensitive actions;
 - database migrations and cleanup;

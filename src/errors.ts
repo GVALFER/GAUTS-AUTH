@@ -4,7 +4,6 @@ export type AuthErrorCode =
     | "SESSION_CLIENT_MISMATCH"
     | "SESSION_DATA_INVALID"
     | "SESSION_INVALID"
-    | "SESSION_LIMIT_REACHED"
     | "SESSION_NOT_FOUND"
     | "DB_UNAVAILABLE";
 

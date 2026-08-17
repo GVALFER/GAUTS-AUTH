@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import {
+  hasClientFields,
   matchesClient,
   normalizeClient,
   normalizeIp,
@@ -80,6 +81,20 @@ describe("client normalization", () => {
     );
     assert.equal(
       matchesClient({ current: normalizeClient({}), stored, validation: [] }),
+      true,
+    );
+  });
+
+  it("never matches a missing configured field", () => {
+    const missing = normalizeClient({});
+
+    assert.equal(hasClientFields({ client: missing, validation: ["ip"] }), false);
+    assert.equal(
+      matchesClient({ current: missing, stored: missing, validation: ["ip"] }),
+      false,
+    );
+    assert.equal(
+      matchesClient({ current: missing, stored: missing, validation: [] }),
       true,
     );
   });
