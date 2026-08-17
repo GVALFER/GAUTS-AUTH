@@ -3,8 +3,9 @@ import { describe, it } from "node:test";
 
 import { isAuthError } from "../src/errors.js";
 import {
+    formatRenewAt,
+    parseRenewAt,
     parseSessionToken,
-    RENEW_COOKIE_VALUE,
     resolveSessionCookieName,
     resolveSessionCookieNames,
 } from "../src/session/cookie.js";
@@ -38,7 +39,22 @@ describe("session cookies", () => {
                 renewName: "__admin_ren",
             },
         );
-        assert.equal(RENEW_COOKIE_VALUE, "1");
+    });
+
+    it("formats and parses renewal timestamps in Unix seconds", () => {
+        assert.equal(formatRenewAt(new Date("2026-08-17T12:00:00.999Z")), "1786968000");
+        assert.equal(parseRenewAt("1786968000"), 1786968000);
+        assert.equal(parseRenewAt(" 1786968000 "), 1786968000);
+        assert.equal(parseRenewAt(), null);
+        assert.equal(parseRenewAt("0"), null);
+        assert.equal(parseRenewAt("1.5"), null);
+        assert.equal(parseRenewAt("invalid"), null);
+        assert.equal(parseRenewAt(Number.MAX_SAFE_INTEGER.toString()), Number.MAX_SAFE_INTEGER);
+        assert.equal(parseRenewAt(`${Number.MAX_SAFE_INTEGER.toString()}0`), null);
+        assert.throws(
+            () => formatRenewAt(new Date("invalid")),
+            (error) => isAuthError(error) && error.code === "SESSION_DATA_INVALID",
+        );
     });
 
     it("validates cookie names and requires them to be unique", () => {

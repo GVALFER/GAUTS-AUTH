@@ -7,7 +7,7 @@ The package stores only a SHA-256 token hash in the database. Browser integratio
 ```text
 session cookie -> opaque token
 cache cookie   -> short signed session snapshot
-renew cookie   -> untrusted renewal marker
+renew cookie   -> untrusted renewAt timestamp
 ```
 
 Only the opaque session token authenticates. It remains stable during sliding renewal, but the session can never exceed its configured maximum lifetime. The optional cache is disabled when omitted and never replaces database validation for unsafe methods, renewal, logout, WebSockets, or direct core calls.
@@ -55,7 +55,7 @@ credentials accepted
     -> load current account and user relations
     -> validate configured status and role rules
     -> write opaque session token cookie
-    -> write 24-hour renewal marker
+    -> write renewAt as Unix seconds
     -> optionally write signed short cache
 ```
 
@@ -82,12 +82,12 @@ opaque session token
 Renewal:
 
 ```text
-Next checks the renewal marker
-    -> marker exists: no API call
-    -> marker missing: POST /auth/renew
+Next reads renewAt from the renewal cookie
+    -> valid future Unix timestamp: no API call
+    -> missing, invalid, or due timestamp: POST /auth/renew
     -> API performs full DB validation
     -> DB expires_at = min(now + ttl, created_at + maxLifetime)
-    -> Set-Cookie with same token, a new marker, and a fresh cache
+    -> Set-Cookie with same token, a new renewAt, and a fresh cache
 ```
 
 `auth.session.resolve()` is always DB-backed and read-only. Only the explicit renewal operation updates database expiry, and neither activity nor renewal can extend the session beyond `maxLifetime`.
@@ -358,7 +358,7 @@ Logout marks the database session as revoked and then clears all three cookies. 
 
 ## Next.js renewal adapter
 
-The Next.js adapter does not authenticate sessions. It calls the private API renewal URL only when the renewal marker is missing.
+The Next.js adapter does not authenticate sessions. It calls the private API renewal URL when `renewAt` is missing, invalid, or due.
 
 ```ts
 import { createNextAuth } from "@gauts/auth/next";
@@ -403,7 +403,7 @@ Result semantics:
 
 | `attempted` | `status` | Meaning |
 | --- | ---: | --- |
-| `false` | `null` | Session token and renewal marker exist. |
+| `false` | `null` | Session token exists and `renewAt` is a valid future timestamp. |
 | `false` | `401` | Session token is missing or malformed. No API call occurred. |
 | `true` | HTTP status | `/auth/renew` was called and its `Set-Cookie` headers were copied. |
 
@@ -497,7 +497,8 @@ cookie: {
 
 - The session cookie contains only the stable opaque token and expires with the database session.
 - The cache cookie contains the signed snapshot and expires after `cache.ttl`.
-- The renewal cookie contains the fixed value `1` and expires at the authoritative `renew_at` time.
+- The renewal cookie contains the authoritative `renew_at` as Unix seconds and expires with the session cookie.
+- The renewal timestamp is an untrusted scheduling hint. It never authenticates or extends a session.
 - Cookie names default to `__sec`, `__cac`, and `__ren`.
 - All three names must be valid and unique.
 

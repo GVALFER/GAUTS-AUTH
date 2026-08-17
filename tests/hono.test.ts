@@ -46,6 +46,7 @@ const session: Session = {
     renew_at: new Date(testNow + 24 * 60 * 60 * 1000),
 };
 const resolved: ResolvedSession = { account, session, user };
+const renewAt = Math.floor(session.renew_at.getTime() / 1000).toString();
 
 const getSetCookies = (response: Response): string[] => {
     const headers = response.headers as Headers & { getSetCookie?: () => string[] };
@@ -217,7 +218,7 @@ describe("Hono adapter", () => {
 
         const second = await app.request("/protected", {
             headers: {
-                Cookie: `session=${token}; ${cached}; session-renew=1`,
+                Cookie: `session=${token}; ${cached}; session-renew=${renewAt}`,
                 ...identityHeaders,
             },
         });
@@ -280,7 +281,7 @@ describe("Hono adapter", () => {
         const response = await app.request("/protected", {
             method: "POST",
             headers: {
-                Cookie: `session=${token}; ${cached}; session-renew=1`,
+                Cookie: `session=${token}; ${cached}; session-renew=${renewAt}`,
                 ...identityHeaders,
             },
         });
@@ -342,10 +343,20 @@ describe("Hono adapter", () => {
         assert.equal(response.status, 204);
         assert.equal(renewCalls, 1);
         assert.equal(getCookiePair(response, "session"), `session=${token}`);
-        assert.equal(getCookiePair(response, "session-renew"), "session-renew=1");
+        assert.equal(
+            getCookiePair(response, "session-renew"),
+            `session-renew=${renewAt}`,
+        );
         assert.match(getCookiePair(response, "session-cache") ?? "", /^session-cache=.+/);
 
-        for (const cookie of getSetCookies(response)) {
+        const cookies = getSetCookies(response);
+        const sessionCookie = cookies.find((cookie) => cookie.startsWith("session="));
+        const renewCookie = cookies.find((cookie) => cookie.startsWith("session-renew="));
+
+        assert.match(sessionCookie ?? "", new RegExp(`Expires=${session.expires_at.toUTCString()}`));
+        assert.match(renewCookie ?? "", new RegExp(`Expires=${session.expires_at.toUTCString()}`));
+
+        for (const cookie of cookies) {
             assert.match(cookie, /HttpOnly/);
             assert.match(cookie, /SameSite=Lax/);
             assert.match(cookie, /Expires=/);
@@ -429,7 +440,10 @@ describe("Hono adapter", () => {
 
         assert.deepEqual(await setResponse.json(), { account_id: account.id });
         assert.equal(getCookiePair(setResponse, "session"), `session=${token}`);
-        assert.equal(getCookiePair(setResponse, "session-renew"), "session-renew=1");
+        assert.equal(
+            getCookiePair(setResponse, "session-renew"),
+            `session-renew=${renewAt}`,
+        );
         assert.match(getCookiePair(setResponse, "session-cache") ?? "", /^session-cache=.+/);
         assert.deepEqual(await revokeResponse.json(), { revoked: [session.id] });
         assert.match(getCookiePair(revokeResponse, "session") ?? "", /^session=$/);

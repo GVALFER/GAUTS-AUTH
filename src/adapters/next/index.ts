@@ -2,8 +2,8 @@ import type { NextRequest, NextResponse } from "next/server.js";
 
 import { createError } from "../../errors.js";
 import {
+    parseRenewAt,
     parseSessionToken,
-    RENEW_COOKIE_VALUE,
     resolveSessionCookieNames,
 } from "../../session/cookie.js";
 
@@ -119,7 +119,9 @@ export const createNextAuth = ({ cookie, renewUrl }: NextAuthConfig): NextAuth =
                 };
             }
 
-            if (request.cookies.get(names.renewName)?.value === RENEW_COOKIE_VALUE) {
+            const renewAt = parseRenewAt(request.cookies.get(names.renewName)?.value);
+
+            if (renewAt !== null && renewAt > Math.floor(Date.now() / 1000)) {
                 return {
                     attempted: false,
                     response,

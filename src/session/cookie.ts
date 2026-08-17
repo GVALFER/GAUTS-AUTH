@@ -13,9 +13,32 @@ export type SessionCookieNames = {
     renewName: string;
 };
 
-export const RENEW_COOKIE_VALUE = "1";
-
 const cookieNamePattern = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
+const renewAtPattern = /^[1-9]\d*$/;
+
+export const formatRenewAt = (value: Date): string => {
+    const seconds = Math.floor(value.getTime() / 1000);
+
+    if (!Number.isSafeInteger(seconds) || seconds < 1) {
+        throw createError({
+            code: "SESSION_DATA_INVALID",
+            message: "Session renewal date is invalid.",
+        });
+    }
+
+    return seconds.toString();
+};
+
+export const parseRenewAt = (value?: string | null): number | null => {
+    const input = value?.trim();
+
+    if (!input || !renewAtPattern.test(input)) {
+        return null;
+    }
+
+    const seconds = Number(input);
+    return Number.isSafeInteger(seconds) ? seconds : null;
+};
 
 export const resolveSessionCookieName = (input?: string): string => {
     const name = input ?? "__sec";

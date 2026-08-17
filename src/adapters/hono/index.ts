@@ -8,8 +8,8 @@ import type { AuthAccount, AuthUser, ResolvedSession, Session } from "../../sess
 
 export type { SessionCacheConfig } from "../../session/cache.js";
 import {
+    formatRenewAt,
     parseSessionToken,
-    RENEW_COOKIE_VALUE,
     resolveSessionCookieNames,
     type SessionCookieNames,
 } from "../../session/cookie.js";
@@ -190,9 +190,9 @@ export const createHonoAdapter = ({
             ...resolved.options,
             expires: value.expires_at,
         });
-        setCookie(context, resolved.names.renewName, RENEW_COOKIE_VALUE, {
+        setCookie(context, resolved.names.renewName, formatRenewAt(value.renew_at), {
             ...resolved.options,
-            expires: value.renew_at,
+            expires: value.expires_at,
         });
     };
 
