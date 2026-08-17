@@ -6,7 +6,6 @@ import { isAuthError } from "../src/errors.js";
 import { createSessionService } from "../src/session/service.js";
 import { hashToken, tokenPattern } from "../src/session/token.js";
 import type {
-    AuthAccount,
     CreateSessionRecord,
     DbAdapter,
     SessionRecord,
@@ -18,7 +17,7 @@ const client = {
     platform: '"macOS"',
 };
 
-const account: AuthAccount = {
+const account = {
     email: "owner@example.com",
     id: "account-1",
     name: "Owner",
@@ -30,7 +29,7 @@ const account: AuthAccount = {
         role: "ADMIN",
         status: "ACTIVE",
     },
-};
+} as const;
 
 type HarnessConfig = {
     maxLifetime?: number;
@@ -48,7 +47,7 @@ const createDb = () => {
         revoke: 0,
         updateExpiry: 0,
     };
-    const adapter: DbAdapter = {
+    const adapter: DbAdapter<typeof account> = {
         create: async (input: CreateSessionRecord) => {
             calls.create += 1;
             rows.set(input.id, { ...input, revoked_at: null, updated_at: null });
@@ -139,7 +138,6 @@ describe("session service", () => {
         assert.equal(row?.token_hash, hashToken(created.token));
         assert.notEqual(row?.token_hash, created.token);
         assert.equal(created.account, account);
-        assert.equal(created.user, account.user);
         assert.equal(created.session.account_id, account.id);
         assert.equal(row?.ip, "2001:db8::1");
         assert.equal(row?.agent, client.agent);
@@ -172,7 +170,6 @@ describe("session service", () => {
             created.session.expires_at.getTime(),
         );
         assert.equal(resolved?.account, account);
-        assert.equal(resolved?.user, account.user);
         assert.equal(harness.db.calls.findToken, 2);
         assert.equal(harness.db.calls.updateExpiry, 0);
     });
@@ -199,7 +196,6 @@ describe("session service", () => {
 
         assert.equal(renewed?.renewed, true);
         assert.equal(renewed?.account, account);
-        assert.equal(renewed?.user, account.user);
         assert.equal(harness.db.calls.updateExpiry, 1);
         assert.equal(
             renewed?.session.expires_at.toISOString(),
@@ -359,7 +355,7 @@ describe("session service", () => {
         assert.equal(harness.db.calls.findToken, 0);
     });
 
-    it("revokes sessions rejected by current account or user rules", async () => {
+    it("revokes sessions rejected by current account access rules", async () => {
         const harness = createHarness();
         const created = await harness.session.create({
             account_id: account.id,
@@ -375,7 +371,7 @@ describe("session service", () => {
         assert.ok(harness.db.rows.get(created.session.id)?.revoked_at);
     });
 
-    it("rejects session creation for a disallowed account or user", async () => {
+    it("rejects session creation for a disallowed account", async () => {
         const harness = createHarness();
         harness.db.setAllowed(false);
 

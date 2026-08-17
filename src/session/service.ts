@@ -6,6 +6,7 @@ import { createError, isAuthError } from "../errors.js";
 import { createToken, hashToken, tokenPattern } from "./token.js";
 import type {
     ActiveSession,
+    AuthAccount,
     AuthSessionRecord,
     DbAdapter,
     Session,
@@ -14,15 +15,15 @@ import type {
     SessionService,
 } from "./types.js";
 
-type SessionDeps = {
+type SessionDeps<TAccount extends AuthAccount> = {
     config: ResolvedSessionConfig;
-    db: DbAdapter;
+    db: DbAdapter<TAccount>;
     now?: () => Date;
 };
 
-type ValidatedSession = {
+type ValidatedSession<TAccount extends AuthAccount> = {
     current: Date;
-    row: AuthSessionRecord;
+    row: AuthSessionRecord<TAccount>;
 };
 
 type RevokeRowsInput = {
@@ -42,11 +43,11 @@ const toActiveSession = (row: SessionRecord): ActiveSession => ({
     updated_at: row.updated_at,
 });
 
-export const createSessionService = ({
+export const createSessionService = <TAccount extends AuthAccount>({
     config,
     db,
     now = () => new Date(),
-}: SessionDeps): SessionService => {
+}: SessionDeps<TAccount>): SessionService<TAccount> => {
     const runDb = async <T>(operation: () => Promise<T>): Promise<T> => {
         try {
             return await operation();
@@ -120,7 +121,9 @@ export const createSessionService = ({
         return session_ids;
     };
 
-    const validateSession = async (input: SessionInput): Promise<ValidatedSession | null> => {
+    const validateSession = async (
+        input: SessionInput,
+    ): Promise<ValidatedSession<TAccount> | null> => {
         if (!tokenPattern.test(input.token)) {
             return null;
         }
@@ -239,7 +242,6 @@ export const createSessionService = ({
                 account: stored.account,
                 session: toSession(row),
                 token,
-                user: stored.account.user,
             };
         },
 
@@ -253,7 +255,6 @@ export const createSessionService = ({
             return {
                 account: validated.row.account,
                 session: toSession(validated.row),
-                user: validated.row.account.user,
             };
         },
 
@@ -271,7 +272,6 @@ export const createSessionService = ({
                     account: row.account,
                     renewed: false,
                     session: toSession(row),
-                    user: row.account.user,
                 };
             }
 
@@ -298,7 +298,6 @@ export const createSessionService = ({
                     expires_at,
                     updated_at: current,
                 }),
-                user: row.account.user,
             };
         },
 

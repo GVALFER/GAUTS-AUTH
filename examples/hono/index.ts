@@ -73,7 +73,6 @@ export const createApp = ({ db, findAccount, secret }: ExampleDeps) => {
     app.get("/account", auth.requireSession, (c) => {
         return c.json({
             account: c.get("account"),
-            user: c.get("user"),
         });
     });
 

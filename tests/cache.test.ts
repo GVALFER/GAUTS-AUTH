@@ -13,20 +13,22 @@ const client = {
     ip: "192.0.2.10",
     platform: "macOS",
 };
-const resolved: ResolvedSession = {
-    account: {
-        email: "owner@example.com",
-        id: "account-1",
-        name: "Owner",
-        role: "OWNER",
+const account = {
+    email: "owner@example.com",
+    id: "account-1",
+    name: "Owner",
+    role: "OWNER",
+    status: "ACTIVE",
+    timezone: "Europe/Lisbon",
+    user: {
+        id: "user-1",
+        role: "ADMIN",
         status: "ACTIVE",
-        timezone: "Europe/Lisbon",
-        user: {
-            id: "user-1",
-            role: "ADMIN",
-            status: "ACTIVE",
-        },
     },
+} as const;
+
+const resolved: ResolvedSession<typeof account> = {
+    account,
     session: {
         account_id: "account-1",
         client,
@@ -34,11 +36,6 @@ const resolved: ResolvedSession = {
         expires_at: new Date("2026-08-17T11:00:00.000Z"),
         id: "session-1",
         renew_at: new Date("2026-08-17T10:30:00.000Z"),
-    },
-    user: {
-        id: "user-1",
-        role: "ADMIN",
-        status: "ACTIVE",
     },
 };
 
@@ -79,7 +76,7 @@ describe("signed session cache", () => {
                 role: resolved.account.role,
                 status: resolved.account.status,
                 timezone: resolved.account.timezone,
-                usr: resolved.user,
+                user: resolved.account.user,
             },
             exp: cached.expires_at.getTime(),
             ses: {

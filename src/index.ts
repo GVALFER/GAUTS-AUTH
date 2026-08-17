@@ -13,8 +13,11 @@ export type { PasswordService } from "./password/index.js";
 export type {
     ActiveSession,
     AuthAccount,
+    AuthAccountOf,
+    AuthData,
+    AuthScalar,
     AuthSessionRecord,
-    AuthUser,
+    AuthValue,
     CreateSessionRecord,
     CreatedSession,
     DbAdapter,

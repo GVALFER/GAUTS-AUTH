@@ -35,7 +35,7 @@ The optional browser cache is disabled when omitted. When configured, it is acce
 
 The cache is bound to the opaque session token, its own expiry, the authoritative session expiry, and the configured client fields. Invalid cache data never authenticates a request; it causes normal database validation.
 
-Cookie caching introduces a bounded consistency window. A session revoked on another device, or account/user access changed in the database, may remain readable until the cache TTL expires. Unsafe methods, renewal, logout, WebSockets, and direct core calls always validate through the database. Applications requiring immediate cross-device read revocation must leave the cache disabled or provide shared server-side enforcement outside this package.
+Cookie caching introduces a bounded consistency window. A session revoked on another device, or selected account or relation access changed in the database, may remain readable until the cache TTL expires. Unsafe methods, renewal, logout, WebSockets, and direct core calls always validate through the database. Applications requiring immediate cross-device read revocation must leave the cache disabled or provide shared server-side enforcement outside this package.
 
 Keep `AUTH_SECRET` in the API environment. Do not expose it to browser code or share it with a frontend merely to inspect the renewal timestamp. The timestamp is intentionally untrusted and never authenticates or renews a session by itself.
 

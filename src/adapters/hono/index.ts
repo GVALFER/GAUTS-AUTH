@@ -3,8 +3,12 @@ import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 import { createAuth, type Auth, type AuthDeps } from "../../auth.js";
 import type { SessionClientInput } from "../../client/index.js";
 import { createError, isAuthError } from "../../errors.js";
-import { createSessionCache, type SessionCacheConfig } from "../../session/cache.js";
-import type { AuthAccount, AuthUser, ResolvedSession, Session } from "../../session/types.js";
+import {
+    createSessionCache,
+    type SessionCache,
+    type SessionCacheConfig,
+} from "../../session/cache.js";
+import type { AuthAccount, ResolvedSession, Session } from "../../session/types.js";
 
 export type { SessionCacheConfig } from "../../session/cache.js";
 import {
@@ -14,14 +18,13 @@ import {
     type SessionCookieNames,
 } from "../../session/cookie.js";
 
-export type HonoAuthVariables = {
-    account: AuthAccount;
+export type HonoAuthVariables<TAccount extends AuthAccount = AuthAccount> = {
+    account: TAccount;
     session: Session;
-    user: AuthUser;
 };
 
-export type HonoAuthEnv = Env & {
-    Variables: HonoAuthVariables;
+export type HonoAuthEnv<TAccount extends AuthAccount = AuthAccount> = Env & {
+    Variables: HonoAuthVariables<TAccount>;
 };
 
 export type HonoCookieConfig = {
@@ -48,20 +51,21 @@ type HonoCacheOptions =
           secret?: string;
       };
 
-export type HonoAdapterConfig = {
-    auth: Auth;
+export type HonoAdapterConfig<TAccount extends AuthAccount = AuthAccount> = {
+    auth: Auth<TAccount>;
     cache?: SessionCacheConfig;
     cookie?: HonoCookieConfig;
     getIp?: HonoGetIp;
     secret?: string;
 };
 
-type HonoAuthBase = AuthDeps & {
+type HonoAuthBase<TAccount extends AuthAccount> = AuthDeps<TAccount> & {
     cookie?: HonoCookieConfig;
     getIp?: HonoGetIp;
 };
 
-export type HonoAuthConfig = HonoAuthBase & HonoCacheOptions;
+export type HonoAuthConfig<TAccount extends AuthAccount = AuthAccount> = HonoAuthBase<TAccount> &
+    HonoCacheOptions;
 
 type CreateSessionInput = {
     account_id: string;
@@ -74,24 +78,25 @@ type SetSessionInput = {
     token: string;
 };
 
-type SetCacheInput = {
+type SetCacheInput<TAccount extends AuthAccount> = {
     context: Context;
-    resolved: ResolvedSession;
+    resolved: ResolvedSession<TAccount>;
     token: string;
 };
 
-export type HonoAdapter = {
+export type HonoAdapter<TAccount extends AuthAccount = AuthAccount> = {
     clearSession(c: Context): void;
     cookie: Readonly<SessionCookieNames>;
     createSession(input: CreateSessionInput): Promise<Session>;
     getToken(c: Context): string | null;
     renewSession(c: Context): Promise<Session>;
-    requireSession: MiddlewareHandler<HonoAuthEnv>;
-    resolveSession(c: Context): Promise<ResolvedSession>;
+    requireSession: MiddlewareHandler<HonoAuthEnv<TAccount>>;
+    resolveSession(c: Context): Promise<ResolvedSession<TAccount>>;
     revokeSession(c: Context): Promise<string[]>;
 };
 
-export type HonoAuth = Auth & HonoAdapter;
+export type HonoAuth<TAccount extends AuthAccount = AuthAccount> = Auth<TAccount> &
+    HonoAdapter<TAccount>;
 
 const resolveCookie = (config: HonoCookieConfig = {}) => {
     const names = resolveSessionCookieNames(config);
@@ -143,13 +148,13 @@ const resolveCookie = (config: HonoCookieConfig = {}) => {
 
 const canUseCache = (method: string): boolean => method === "GET" || method === "HEAD";
 
-export const createHonoAdapter = ({
+export const createHonoAdapter = <TAccount extends AuthAccount>({
     auth,
     cache,
     cookie,
     getIp,
     secret,
-}: HonoAdapterConfig): HonoAdapter => {
+}: HonoAdapterConfig<TAccount>): HonoAdapter<TAccount> => {
     if (getIp !== undefined && typeof getIp !== "function") {
         throw createError({
             code: "AUTH_CONFIG_INVALID",
@@ -165,7 +170,7 @@ export const createHonoAdapter = ({
     }
 
     const resolved = resolveCookie(cookie);
-    let cacheService = null;
+    let cacheService: SessionCache<TAccount> | null = null;
 
     if (cache !== undefined) {
         if (typeof secret !== "string") {
@@ -175,7 +180,7 @@ export const createHonoAdapter = ({
             });
         }
 
-        cacheService = createSessionCache({
+        cacheService = createSessionCache<TAccount>({
             config: cache,
             secret,
             session: auth.config.session,
@@ -203,7 +208,7 @@ export const createHonoAdapter = ({
         });
     };
 
-    const setCache = ({ context, resolved: value, token }: SetCacheInput): void => {
+    const setCache = ({ context, resolved: value, token }: SetCacheInput<TAccount>): void => {
         if (!cacheService) {
             return;
         }
@@ -249,7 +254,7 @@ export const createHonoAdapter = ({
         client: SessionClientInput;
         context: Context;
         token: string;
-    }): Promise<ResolvedSession> => {
+    }): Promise<ResolvedSession<TAccount>> => {
         let value;
 
         try {
@@ -278,10 +283,10 @@ export const createHonoAdapter = ({
             account_id,
             client: await getSessionClient(context),
         });
-        const value: ResolvedSession = {
+
+        const value: ResolvedSession<TAccount> = {
             account: created.account,
             session: created.session,
-            user: created.user,
         };
 
         setSession({ context, session: created.session, token: created.token });
@@ -290,7 +295,7 @@ export const createHonoAdapter = ({
         return created.session;
     };
 
-    const resolveSession = async (c: Context): Promise<ResolvedSession> => {
+    const resolveSession = async (c: Context): Promise<ResolvedSession<TAccount>> => {
         const token = requireToken(c);
         const client = await getSessionClient(c);
         const useCache = canUseCache(c.req.method);
@@ -348,12 +353,11 @@ export const createHonoAdapter = ({
         return renewed.session;
     };
 
-    const requireSession: MiddlewareHandler<HonoAuthEnv> = async (c, next) => {
+    const requireSession: MiddlewareHandler<HonoAuthEnv<TAccount>> = async (c, next) => {
         const value = await resolveSession(c);
 
         c.set("session", value.session);
         c.set("account", value.account);
-        c.set("user", value.user);
         await next();
     };
 
@@ -377,7 +381,7 @@ export const createHonoAdapter = ({
     };
 };
 
-export const createHonoAuth = ({
+export const createHonoAuth = <TAccount extends AuthAccount>({
     cache,
     cookie,
     db,
@@ -385,7 +389,7 @@ export const createHonoAuth = ({
     password,
     secret,
     session,
-}: HonoAuthConfig): HonoAuth => {
+}: HonoAuthConfig<TAccount>): HonoAuth<TAccount> => {
     const auth = createAuth({
         db,
         ...(password === undefined ? {} : { password }),

@@ -3,8 +3,8 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import { matchesClient, normalizeClient, type SessionClientInput } from "../client/index.js";
 import type { ResolvedSessionConfig } from "../config.js";
 import { createError } from "../errors.js";
-import { isAuthUser, isNullableString, isRecord } from "./guards.js";
-import type { AuthAccount, AuthUser, ResolvedSession, Session } from "./types.js";
+import { isAuthAccount, isNullableString, isRecord } from "./guards.js";
+import type { AuthAccount, ResolvedSession, Session } from "./types.js";
 
 export type SessionCacheConfig = {
     ttl: number;
@@ -23,18 +23,14 @@ type CacheInput = {
     value: string | null | undefined;
 };
 
-type CreateCacheInput = {
-    resolved: ResolvedSession;
+type CreateCacheInput<TAccount extends AuthAccount> = {
+    resolved: ResolvedSession<TAccount>;
     token: string;
 };
 
 type SessionCacheValue = {
     expires_at: Date;
     value: string;
-};
-
-type StoredAccount = Omit<AuthAccount, "user"> & {
-    usr: AuthUser;
 };
 
 type StoredSession = {
@@ -51,14 +47,14 @@ type ToSessionInput = {
 };
 
 type CachePayload = {
-    acc: StoredAccount;
+    acc: AuthAccount;
     exp: number;
     ses: StoredSession;
 };
 
-export type SessionCache = {
-    create(input: CreateCacheInput): SessionCacheValue;
-    resolve(input: CacheInput): ResolvedSession | null;
+export type SessionCache<TAccount extends AuthAccount = AuthAccount> = {
+    create(input: CreateCacheInput<TAccount>): SessionCacheValue;
+    resolve(input: CacheInput): ResolvedSession<TAccount> | null;
 };
 
 type MatchesSignature = {
@@ -93,19 +89,6 @@ const matchesSignature = ({ body, secret, signature, token }: MatchesSignature):
     return expected.byteLength === received.byteLength && timingSafeEqual(expected, received);
 };
 
-const isStoredAccount = (value: unknown): value is StoredAccount => {
-    return (
-        isRecord(value) &&
-        typeof value.email === "string" &&
-        typeof value.id === "string" &&
-        typeof value.name === "string" &&
-        typeof value.role === "string" &&
-        typeof value.status === "string" &&
-        isNullableString(value.timezone) &&
-        isAuthUser(value.usr)
-    );
-};
-
 const isStoredSession = (value: unknown): value is StoredSession => {
     return (
         isRecord(value) &&
@@ -126,7 +109,7 @@ const isStoredSession = (value: unknown): value is StoredSession => {
 const isCachePayload = (value: unknown): value is CachePayload => {
     return (
         isRecord(value) &&
-        isStoredAccount(value.acc) &&
+        isAuthAccount(value.acc) &&
         typeof value.exp === "number" &&
         Number.isSafeInteger(value.exp) &&
         isStoredSession(value.ses)
@@ -141,26 +124,6 @@ const parsePayload = (body: string): CachePayload | null => {
         return null;
     }
 };
-
-const toAccount = (stored: StoredAccount): AuthAccount => ({
-    email: stored.email,
-    id: stored.id,
-    name: stored.name,
-    role: stored.role,
-    status: stored.status,
-    timezone: stored.timezone,
-    user: stored.usr,
-});
-
-const toStoredAccount = (account: AuthAccount): StoredAccount => ({
-    email: account.email,
-    id: account.id,
-    name: account.name,
-    role: account.role,
-    status: account.status,
-    timezone: account.timezone,
-    usr: account.user,
-});
 
 const toSession = ({ account_id, stored }: ToSessionInput): Session => ({
     account_id,
@@ -179,12 +142,12 @@ const toStoredSession = (session: Session): StoredSession => ({
     ren: session.renew_at.getTime(),
 });
 
-export const createSessionCache = ({
+export const createSessionCache = <TAccount extends AuthAccount>({
     config,
     now = () => new Date(),
     secret,
     session: sessionConfig,
-}: SessionCacheDeps): SessionCache => {
+}: SessionCacheDeps): SessionCache<TAccount> => {
     if (!Number.isInteger(config.ttl) || config.ttl < 1 || config.ttl > sessionConfig.ttl) {
         throw createError({
             code: "AUTH_CONFIG_INVALID",
@@ -212,7 +175,7 @@ export const createSessionCache = ({
             );
 
             const payload: CachePayload = {
-                acc: toStoredAccount(resolved.account),
+                acc: resolved.account,
                 exp: expires_at.getTime(),
                 ses: toStoredSession(resolved.session),
             };
@@ -244,11 +207,13 @@ export const createSessionCache = ({
             }
 
             const current = now().getTime();
-            const account = toAccount(payload.acc);
+            const account = payload.acc as TAccount;
+
             const resolvedSession = toSession({
                 account_id: account.id,
                 stored: payload.ses,
             });
+
             const max_expires_at =
                 resolvedSession.created_at.getTime() + sessionConfig.maxLifetime * 1000;
 
@@ -271,7 +236,6 @@ export const createSessionCache = ({
             return {
                 account,
                 session: resolvedSession,
-                user: account.user,
             };
         },
     };

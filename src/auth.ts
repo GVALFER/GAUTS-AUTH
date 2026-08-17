@@ -3,23 +3,23 @@ import { resolvePasswordConfig, resolveSessionConfig } from "./config.js";
 import { createError } from "./errors.js";
 import { createPassword, type PasswordService } from "./password/index.js";
 import { createSessionService } from "./session/service.js";
-import type { DbAdapter, SessionService } from "./session/types.js";
+import type { AuthAccount, DbAdapter, SessionService } from "./session/types.js";
 
 export type AuthConfig = {
     password?: PasswordConfig;
     session?: SessionConfig;
 };
 
-export type AuthDeps = AuthConfig & {
-    db: DbAdapter;
+export type AuthDeps<TAccount extends AuthAccount = AuthAccount> = AuthConfig & {
+    db: DbAdapter<TAccount>;
 };
 
-export type Auth = {
+export type Auth<TAccount extends AuthAccount = AuthAccount> = {
     readonly config: {
         readonly session: Readonly<ResolvedSessionConfig>;
     };
     password: PasswordService;
-    session: SessionService;
+    session: SessionService<TAccount>;
 };
 
 type RequireMethodsInput = {
@@ -46,7 +46,11 @@ const requireMethods = ({ methods, name, value }: RequireMethodsInput): void => 
     }
 };
 
-export const createAuth = ({ db, password, session }: AuthDeps): Auth => {
+export const createAuth = <TAccount extends AuthAccount>({
+    db,
+    password,
+    session,
+}: AuthDeps<TAccount>): Auth<TAccount> => {
     requireMethods({
         methods: ["create", "find", "findActive", "findToken", "revoke", "updateExpiry"],
         name: "DB",

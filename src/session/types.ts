@@ -1,19 +1,15 @@
 import type { SessionClient, SessionClientInput } from "../client/index.js";
 
-export type AuthUser = {
-    id: string;
-    role: string;
-    status: string;
+export type AuthScalar = boolean | null | number | string;
+
+export type AuthValue = AuthScalar | AuthData | readonly AuthValue[];
+
+export type AuthData = {
+    [key: string]: AuthValue;
 };
 
 export type AuthAccount = {
-    email: string;
     id: string;
-    name: string;
-    role: string;
-    status: string;
-    timezone: string | null;
-    user: AuthUser;
 };
 
 export type SessionRecord = {
@@ -29,8 +25,8 @@ export type SessionRecord = {
     updated_at: Date | null;
 };
 
-export type AuthSessionRecord = SessionRecord & {
-    account: AuthAccount;
+export type AuthSessionRecord<TAccount extends AuthAccount = AuthAccount> = SessionRecord & {
+    account: TAccount;
     allowed: boolean;
 };
 
@@ -47,22 +43,21 @@ export type Session = {
     renew_at: Date;
 };
 
-export type CreatedSession = {
-    account: AuthAccount;
+export type CreatedSession<TAccount extends AuthAccount = AuthAccount> = {
+    account: TAccount;
     session: Session;
     token: string;
-    user: AuthUser;
 };
 
-export type ResolvedSession = {
-    account: AuthAccount;
+export type ResolvedSession<TAccount extends AuthAccount = AuthAccount> = {
+    account: TAccount;
     session: Session;
-    user: AuthUser;
 };
 
-export type RenewedSession = ResolvedSession & {
-    renewed: boolean;
-};
+export type RenewedSession<TAccount extends AuthAccount = AuthAccount> =
+    ResolvedSession<TAccount> & {
+        renewed: boolean;
+    };
 
 export type CreateSession = {
     account_id: string;
@@ -74,21 +69,28 @@ export type SessionInput = {
     token: string;
 };
 
-export type DbAdapter = {
+export type DbAdapter<TAccount extends AuthAccount = AuthAccount> = {
     create(session: CreateSessionRecord): Promise<void>;
     find(input: { account_id: string; session_id: string }): Promise<SessionRecord | null>;
     findActive(input: { account_id: string; now: Date }): Promise<SessionRecord[]>;
-    findToken(token_hash: string): Promise<AuthSessionRecord | null>;
+    findToken(token_hash: string): Promise<AuthSessionRecord<TAccount> | null>;
     revoke(input: { revoked_at: Date; session_ids: string[] }): Promise<void>;
     updateExpiry(input: { expires_at: Date; session_id: string; updated_at: Date }): Promise<void>;
 };
 
-export type SessionService = {
-    create(input: CreateSession): Promise<CreatedSession>;
+export type SessionService<TAccount extends AuthAccount = AuthAccount> = {
+    create(input: CreateSession): Promise<CreatedSession<TAccount>>;
     list(account_id: string): Promise<ActiveSession[]>;
-    renew(input: SessionInput): Promise<RenewedSession | null>;
-    resolve(input: SessionInput): Promise<ResolvedSession | null>;
+    renew(input: SessionInput): Promise<RenewedSession<TAccount> | null>;
+    resolve(input: SessionInput): Promise<ResolvedSession<TAccount> | null>;
     revoke(input: { account_id: string; session_id: string }): Promise<string[]>;
     revokeAccount(account_id: string): Promise<string[]>;
     revokeToken(token: string): Promise<string[]>;
 };
+
+export type AuthAccountOf<T> =
+    T extends DbAdapter<infer TAccount>
+        ? TAccount
+        : T extends { session: SessionService<infer TAccount> }
+          ? TAccount
+          : never;

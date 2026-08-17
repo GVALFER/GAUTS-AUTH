@@ -9,17 +9,12 @@ import {
 } from "../src/adapters/hono/index.js";
 import type { Auth } from "../src/auth.js";
 import { createError, isAuthError } from "../src/errors.js";
-import type {
-    AuthAccount,
-    RenewedSession,
-    ResolvedSession,
-    Session,
-} from "../src/session/types.js";
+import type { RenewedSession, ResolvedSession, Session } from "../src/session/types.js";
 
 const token = "a".repeat(43);
 const secret = "s".repeat(32);
 const testNow = Date.now();
-const account: AuthAccount = {
+const account = {
     email: "owner@example.com",
     id: "account-1",
     name: "Owner",
@@ -31,8 +26,7 @@ const account: AuthAccount = {
         role: "ADMIN",
         status: "ACTIVE",
     },
-};
-const user = account.user;
+} as const;
 const session: Session = {
     account_id: account.id,
     client: {
@@ -45,7 +39,7 @@ const session: Session = {
     id: "session-1",
     renew_at: new Date(testNow + 24 * 60 * 60 * 1000),
 };
-const resolved: ResolvedSession = { account, session, user };
+const resolved: ResolvedSession<typeof account> = { account, session };
 const renewAt = Math.floor(session.renew_at.getTime() / 1000).toString();
 
 const getSetCookies = (response: Response): string[] => {
@@ -66,8 +60,8 @@ const getCookiePair = (response: Response, name: string): string | null => {
 };
 
 const createMockAuth = (
-    resolve: (tokenValue: string) => Promise<ResolvedSession | null>,
-): Auth => ({
+    resolve: (tokenValue: string) => Promise<ResolvedSession<typeof account> | null>,
+): Auth<typeof account> => ({
     config: {
         session: {
             maxLifetime: 30 * 24 * 60 * 60,
@@ -87,12 +81,12 @@ const createMockAuth = (
     },
     session: {
         async create() {
-            return { account, session, token, user };
+            return { account, session, token };
         },
         async list() {
             return [];
         },
-        async renew(input): Promise<RenewedSession | null> {
+        async renew(input): Promise<RenewedSession<typeof account> | null> {
             const value = await resolve(input.token);
             return value ? { ...value, renewed: true } : null;
         },
@@ -111,7 +105,7 @@ const createMockAuth = (
     },
 });
 
-const withoutIpValidation = (auth: Auth): Auth => ({
+const withoutIpValidation = (auth: Auth<typeof account>): Auth<typeof account> => ({
     ...auth,
     config: {
         session: {
@@ -121,7 +115,13 @@ const withoutIpValidation = (auth: Auth): Auth => ({
     },
 });
 
-const createApp = ({ auth, cache = false }: { auth: Auth; cache?: boolean }) => {
+const createApp = ({
+    auth,
+    cache = false,
+}: {
+    auth: Auth<typeof account>;
+    cache?: boolean;
+}) => {
     const adapter = createHonoAdapter({
         auth,
         cookie: {
@@ -154,7 +154,6 @@ const createApp = ({ auth, cache = false }: { auth: Auth; cache?: boolean }) => 
         c.json({
             account: c.get("account"),
             accountId: c.get("session").account_id,
-            user: c.get("user"),
         }),
     );
     app.post("/protected", adapter.requireSession, (c) => c.body(null, 204));
@@ -234,7 +233,6 @@ describe("Hono adapter", () => {
         assert.deepEqual(await response.json(), {
             account,
             accountId: "account-1",
-            user,
         });
         assert.deepEqual(getSetCookies(response), []);
     });
@@ -450,7 +448,7 @@ describe("Hono adapter", () => {
                     platform: "macOS",
                 },
             });
-            return { account, session, token, user };
+            return { account, session, token };
         };
         auth.session.revokeToken = async (value) => {
             assert.equal(value, token);

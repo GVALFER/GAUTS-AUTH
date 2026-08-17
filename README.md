@@ -97,12 +97,15 @@ cookies        __ses, __cac, __ren
 
 ```ts
 import { Hono } from "hono";
+import type { AuthAccountOf } from "@gauts/auth";
 import type { HonoAuthEnv } from "@gauts/auth/hono";
 
 import { auth } from "./auth.js";
 import { DUMMY_PASSWORD_HASH } from "./password.js";
 
-const app = new Hono<HonoAuthEnv>();
+type Account = AuthAccountOf<typeof auth>;
+
+const app = new Hono<HonoAuthEnv<Account>>();
 
 app.post("/auth/login", async (c) => {
     const body = await c.req.json<{
@@ -143,7 +146,6 @@ app.get("/account", auth.requireSession, (c) => {
     return c.json({
         account: c.get("account"),
         session: c.get("session"),
-        user: c.get("user"),
     });
 });
 ```
@@ -330,7 +332,7 @@ The cache is signed but not encrypted. Do not place passwords, password hashes, 
         role,
         status,
         timezone,
-        usr: { id, role, status },
+        user: { id, role, status },
     },
     ses: {
         id,
@@ -348,45 +350,122 @@ The cache is signed but not encrypted. Do not place passwords, password hashes, 
 
 ### Prisma adapter
 
+The default adapter requires the Prisma models `sessions` and `account`. The session model must expose an `account` relation. The account model must contain string `id`, `email`, and `password_hash` fields. Only `account.id` and `account.email` enter the payload by default.
+
+#### Default models
+
 ```ts
 const db = createPrismaAdapter({
     client: prisma,
-    //  config: {
-    //     session: {
-    //         table: "account_sessions",
-    //         relations: {
-    //             account: "account",
-    //             user: "user",
-    //         },
-    //     },
-    //     access: {
-    //         account: {
-    //             allowedRoles: ["OWNER", "ADMIN"],
-    //             allowedStatuses: ["ACTIVE"],
-    //         },
-    //         user: {
-    //             allowedRoles: ["ADMIN"],
-    //             allowedStatuses: ["ACTIVE"],
-    //         },
-    //     },
-    // },
 });
 ```
 
-| Property                                | Type / allowed values           |            Required             | Default              | Description                                                           |
-| --------------------------------------- | ------------------------------- | :-----------------------------: | -------------------- | --------------------------------------------------------------------- |
-| `client`                                | Generated Prisma client         |               ✅                | —                    | Prisma client containing the session delegate.                        |
-| `config.session`                        | Session model configuration     |               ❌                | Conventional names   | Groups the Prisma delegate and relation names.                        |
-| `config.session.table`                  | Compatible Prisma delegate name | Only without `account_sessions` | `"account_sessions"` | Delegate used to store sessions. This is not the physical table name. |
-| `config.session.relations.account`      | Non-empty `string`              |               ❌                | `"account"`          | Account relation field on the session model.                          |
-| `config.session.relations.user`         | Non-empty `string`              |               ❌                | `"user"`             | User relation field nested inside the account relation.               |
-| `config.access.account.allowedStatuses` | Non-empty unique `string[]`     |               ✅                | —                    | Account statuses allowed to authenticate.                             |
-| `config.access.account.allowedRoles`    | Non-empty unique `string[]`     |               ❌                | All roles            | Account roles allowed to authenticate.                                |
-| `config.access.user.allowedStatuses`    | Non-empty unique `string[]`     |               ✅                | —                    | User statuses allowed to authenticate.                                |
-| `config.access.user.allowedRoles`       | Non-empty unique `string[]`     |               ❌                | All roles            | User roles allowed to authenticate.                                   |
+The resolved account payload is:
 
-Status and role values are deliberately dynamic. The package does not define application-specific enums.
-Every configured account and user condition must match. Omitting `allowedRoles` accepts every role, but both `allowedStatuses` lists remain required.
+```ts
+{
+    email: "owner@example.com",
+    id: "account-id",
+}
+```
+
+#### Selected fields and access rules
+
+`select` defines the public account payload. `access` defines the values required to authenticate:
+
+```ts
+const db = createPrismaAdapter({
+    client: prisma,
+    models: {
+        account: {
+            select: ["id", "email", "name", "role"],
+            access: {
+                role: ["OWNER", "ADMIN"],
+                status: ["ACTIVE"],
+            },
+        },
+    },
+});
+```
+
+`status` is selected internally for validation but is not exposed because it is absent from `select`.
+
+#### Custom models and nested relations
+
+Use `name` when the Prisma delegate differs from the default. Nested relation keys must match the relation fields on the parent model:
+
+```ts
+const db = createPrismaAdapter({
+    client: prisma,
+    models: {
+        sessions: {
+            name: "admin_sessions",
+        },
+        account: {
+            name: "user_accounts",
+            select: ["id", "email", "name", "role", "status", "timezone"],
+            access: {
+                role: ["OWNER", "ADMIN"],
+                status: ["ACTIVE"],
+            },
+            relations: {
+                user: {
+                    name: "users",
+                    select: ["id", "role", "status"],
+                    access: {
+                        status: ["ACTIVE"],
+                    },
+                },
+            },
+        },
+    },
+});
+```
+
+This configuration uses `prisma.admin_sessions`, `prisma.user_accounts`, and `prisma.users`. The root relation on `admin_sessions` must still be named `account`.
+
+When a relation name differs from its target model, the object key identifies the relation and `name` identifies the delegate:
+
+```ts
+relations: {
+    owner: {
+        name: "users",
+        select: ["id", "email", "status"],
+        access: {
+            status: ["ACTIVE"],
+        },
+    },
+}
+```
+
+This loads the `account.owner` relation using the `prisma.users` model metadata.
+
+| Property                              | Type / allowed values                     | Required | Default              | Description                                                                 |
+| ------------------------------------- | ----------------------------------------- | :------: | -------------------- | --------------------------------------------------------------------------- |
+| `client`                              | Generated Prisma client                   |    ✅    | —                    | Prisma client containing every configured model.                            |
+| `models.sessions.name`                | Compatible session delegate name          |    ❌    | `"sessions"`         | Overrides the Prisma model used to persist sessions.                         |
+| `models.account.name`                 | Compatible account delegate name          |    ❌    | `"account"`          | Identifies the account model and types its configuration.                    |
+| `models.account.select`               | Unique scalar field array                 |    ❌    | `["id", "email"]`    | Fields exposed in `account` and the signed cache. `id` is always included.   |
+| `models.account.access`               | Scalar equality or allowed-value arrays   |    ❌    | `{}`                 | Conditions required for authentication.                                     |
+| `models.account.relations`            | Relation configuration object             |    ❌    | `{}`                 | Additional required to-one relations loaded inside `account`.               |
+| `models.account.relations[key].name`  | Compatible related-model delegate name    |    ❌    | Relation key         | Identifies the related model and types its `select` and `access`.            |
+| `models.account.relations[key].select`| Unique scalar field array                 |    ❌    | `["id"]`             | Fields exposed under that relation. `id` is always included.                 |
+| `models.account.relations[key].access`| Scalar equality or allowed-value arrays   |    ❌    | `{}`                 | Conditions required on the related record.                                  |
+
+The root Prisma relation on the session model is always named `account`. Keys inside `relations` are the actual Prisma relation field names. `name` identifies the target Prisma model/delegate; it does not rename a relation or a physical SQL table.
+
+`select` accepts only JSON-safe scalar fields. It controls the public account payload and receives autocomplete from the generated Prisma client. Treat it as an explicit allowlist: never select passwords, password hashes, tokens, or other secrets because the cache is signed, not encrypted. Fields used only by `access` are selected for validation and removed before the account is exposed or cached.
+
+Each `access` condition is either an exact scalar value or an array of accepted values:
+
+```ts
+access: {
+    active: true,
+    role: ["OWNER", "ADMIN"],
+}
+```
+
+All configured conditions and nested relations must match. Omitting `access` applies no application-specific account restriction.
 
 ### Next.js adapter
 
@@ -412,7 +491,7 @@ export const nextAuth = createNextAuth({
 credentials accepted
     -> generate 256-bit opaque token
     -> store SHA-256 token hash in DB
-    -> load current account and user
+    -> load selected current account data and configured relations
     -> apply configured access rules
     -> write __ses
     -> write __ren
@@ -426,7 +505,7 @@ Only the raw browser token authenticates. The database stores only its SHA-256 h
 ```text
 session token
     -> valid signed cache?
-        -> yes: expose cached account, user, and session
+        -> yes: expose cached account and session
         -> no: validate through DB and create a fresh cache
 ```
 
@@ -436,7 +515,7 @@ session token
 session token
     -> SHA-256 hash
     -> indexed DB lookup
-    -> validate expiry, revocation, account, user, and client
+    -> validate expiry, revocation, account access, configured relations, and client
     -> clear short cache
     -> continue
 ```
@@ -456,39 +535,24 @@ Next reads __ren
 
 ## Prisma schema
 
-The Prisma adapter resolves:
+The default Prisma adapter resolves:
 
 ```text
-account_sessions -> account -> user
+sessions -> account
 ```
 
-The following is a complete MySQL/MariaDB example. Merge the required fields and relations into existing account and user models when applicable.
+The following is a complete MySQL/MariaDB example for email/password authentication. The account model requires `id`, `email`, and `password_hash`; the password hash is used only by the application's login query and never enters the session payload.
 
 ```prisma
-model users {
-  id      String @id @default(uuid()) @db.VarChar(255)
-  role    String @db.VarChar(255)
-  status  String @db.VarChar(255)
+model account {
+  id            String @id @default(uuid()) @db.VarChar(255)
+  email         String @unique @db.VarChar(255)
+  password_hash String @db.VarChar(255)
 
-  accounts user_accounts[]
+  sessions sessions[]
 }
 
-model user_accounts {
-  id         String  @id @default(uuid()) @db.VarChar(255)
-  user_id    String  @db.VarChar(255)
-  email      String  @db.VarChar(255)
-  name       String  @db.VarChar(255)
-  role       String  @db.VarChar(255)
-  status     String  @db.VarChar(255)
-  timezone   String? @db.VarChar(255)
-
-  user     users              @relation(fields: [user_id], references: [id], onDelete: Cascade)
-  sessions account_sessions[]
-
-  @@index([user_id])
-}
-
-model account_sessions {
+model sessions {
   id          String    @id @default(uuid()) @db.VarChar(255)
   account_id  String    @db.VarChar(255)
   token_hash  String    @unique @db.VarChar(64)
@@ -500,7 +564,7 @@ model account_sessions {
   created_at  DateTime  @default(now()) @db.Timestamp(0)
   updated_at  DateTime? @db.Timestamp(0)
 
-  account user_accounts @relation(fields: [account_id], references: [id], onDelete: Cascade)
+  account account @relation(fields: [account_id], references: [id], onDelete: Cascade)
 
   @@index([account_id])
   @@index([expires_at])
@@ -510,17 +574,16 @@ model account_sessions {
 
 Required fields and relation names:
 
-| Path                    | Required fields                                                                                                     |
-| ----------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| Session model           | `id`, `account_id`, `token_hash`, `ip`, `platform`, `agent`, `expires_at`, `revoked_at`, `created_at`, `updated_at` |
-| `account` relation      | `id`, `email`, `name`, `role`, `status`, `timezone`                                                                 |
-| `account.user` relation | `id`, `role`, `status`                                                                                              |
+| Path               | Required fields                                                                                                     |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------- |
+| Session model      | `id`, `account_id`, `token_hash`, `ip`, `platform`, `agent`, `expires_at`, `revoked_at`, `created_at`, `updated_at` |
+| `account` relation | String `id`, `email`, and `password_hash`                                                                           |
 
-The relation names default to `account` and `user`. Configure `session.relations` when the application uses different field names. Their inverse relation names may differ. Application models may add fields, indexes, defaults, and relations. Role and status fields may use Prisma enums.
+The session relation must be named `account`. Additional account fields and nested relations are selected through `models.account`. Application models may add fields, indexes, defaults, mappings, and relations. Access fields may use Prisma enums, strings, booleans, numbers, or null.
 
 Keep `agent` large enough for the complete User-Agent. Use provider-compatible native annotations when the database is not MySQL/MariaDB.
 
-`config.session.table` is a Prisma client delegate name. A model named `AdminSession` mapped with `@@map("account_sessions")` normally uses the `adminSession` delegate.
+`models.sessions.name` and every model `name` are Prisma client delegate names. Physical SQL table names remain an application concern and can use Prisma `@@map` without changing the adapter configuration.
 
 Create and run migrations through the application's Prisma workflow. The package never manages migrations.
 
@@ -533,24 +596,11 @@ Create and run migrations through the application's Prisma workflow. The package
 ```ts
 const account = c.get("account");
 const session = c.get("session");
-const user = c.get("user");
 ```
 
 ```ts
 type AuthAccount = {
-    email: string;
     id: string;
-    name: string;
-    role: string;
-    status: string;
-    timezone: string | null;
-    user: AuthUser;
-};
-
-type AuthUser = {
-    id: string;
-    role: string;
-    status: string;
 };
 
 type Session = {
@@ -567,14 +617,16 @@ type Session = {
 };
 ```
 
-Only `account_id` is persisted in the session row. Current account and user data are loaded through the database relation and never copied into the table.
+The Prisma adapter refines `AuthAccount` with the exact fields and nested relations declared in `select`.
+
+Only `account_id` is persisted in the session row. Current selected account data and configured relations are loaded through the database relation and never copied into the table.
 
 ### Methods
 
 | Method                                        | Purpose                                                                    |
 | --------------------------------------------- | -------------------------------------------------------------------------- |
 | `auth.createSession({ account_id, context })` | Creates the DB session and writes the browser cookies.                     |
-| `auth.resolveSession(context)`                | Resolves a request and returns account, user, and session.                 |
+| `auth.resolveSession(context)`                | Resolves a request and returns the selected account and session.           |
 | `auth.renewSession(context)`                  | Performs DB validation, renews when due, and writes authoritative cookies. |
 | `auth.revokeSession(context)`                 | Revokes the current DB session and clears cookies.                         |
 | `auth.clearSession(context)`                  | Clears browser cookies without revoking the DB session.                    |
@@ -689,17 +741,17 @@ const db = {
 } satisfies DbAdapter;
 ```
 
-`findToken` receives only the SHA-256 token hash. It must return the current nested account and user plus an `allowed` result. Raw tokens must never be persisted.
+`findToken` receives only the SHA-256 token hash. It must return the current selected account plus an `allowed` result. Raw tokens must never be persisted.
 
 ## Performance
 
 The package contains no Redis or in-process cache.
 
-Without the optional browser cache, each `requireSession` performs an indexed database lookup through `account_sessions.token_hash`.
+Without the optional browser cache, each `requireSession` performs an indexed database lookup through `sessions.token_hash`.
 
 With a valid cache, `GET` and `HEAD` skip the lookup until `cache.ttl` expires. Unsafe methods always use current database state.
 
-The tradeoff is explicit: revocation and account/user changes made elsewhere may remain visible to safe cached requests until the short TTL expires. A 60-second TTL limits this stale-read window to one minute. Disable cache when immediate read revocation is required.
+The tradeoff is explicit: revocation and selected account or relation changes made elsewhere may remain visible to safe cached requests until the short TTL expires. A 60-second TTL limits this stale-read window to one minute. Disable cache when immediate read revocation is required.
 
 ## Errors
 
