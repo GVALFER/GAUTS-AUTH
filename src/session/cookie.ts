@@ -1,16 +1,17 @@
+import { COOKIE_DEFAULTS } from "../config.js";
 import { createError } from "../errors.js";
 import { tokenPattern } from "./token.js";
 
 export type SessionCookieNamesInput = {
     cacheName?: string;
-    name?: string;
     renewName?: string;
+    sessionName?: string;
 };
 
 export type SessionCookieNames = {
     cacheName: string;
-    name: string;
     renewName: string;
+    sessionName: string;
 };
 
 const cookieNamePattern = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
@@ -41,7 +42,7 @@ export const parseRenewAt = (value?: string | null): number | null => {
 };
 
 export const resolveSessionCookieName = (input?: string): string => {
-    const name = input ?? "__sec";
+    const name = input ?? COOKIE_DEFAULTS.sessionName;
 
     if (!cookieNamePattern.test(name)) {
         throw createError({
@@ -56,18 +57,18 @@ export const resolveSessionCookieName = (input?: string): string => {
 export const resolveSessionCookieNames = (
     input: SessionCookieNamesInput = {},
 ): SessionCookieNames => {
-    const name = resolveSessionCookieName(input.name);
-    const cacheName = resolveSessionCookieName(input.cacheName ?? "__cac");
-    const renewName = resolveSessionCookieName(input.renewName ?? "__ren");
+    const cacheName = resolveSessionCookieName(input.cacheName ?? COOKIE_DEFAULTS.cacheName);
+    const renewName = resolveSessionCookieName(input.renewName ?? COOKIE_DEFAULTS.renewName);
+    const sessionName = resolveSessionCookieName(input.sessionName);
 
-    if (new Set([name, cacheName, renewName]).size !== 3) {
+    if (new Set([sessionName, cacheName, renewName]).size !== 3) {
         throw createError({
             code: "AUTH_CONFIG_INVALID",
             message: "Session cookie names must be unique.",
         });
     }
 
-    return { cacheName, name, renewName };
+    return { cacheName, renewName, sessionName };
 };
 
 export const parseSessionToken = (value?: string | null): string | null => {

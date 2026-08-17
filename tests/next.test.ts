@@ -57,7 +57,7 @@ describe("Next adapter", () => {
 
         try {
             const auth = createNextAuth({
-                cookie: { name: "session", renewName: "session-renew" },
+                cookie: { renewName: "session-renew", sessionName: "session" },
                 renewUrl: "https://api.example.com/auth/renew",
             });
             const result = await auth.renew({
@@ -89,7 +89,7 @@ describe("Next adapter", () => {
 
         try {
             const auth = createNextAuth({
-                cookie: { name: "session", renewName: "session-renew" },
+                cookie: { renewName: "session-renew", sessionName: "session" },
                 renewUrl: "https://api.example.com/auth/renew",
             });
             const result = await auth.renew({
@@ -136,7 +136,7 @@ describe("Next adapter", () => {
 
         try {
             const auth = createNextAuth({
-                cookie: { name: "session", renewName: "session-renew" },
+                cookie: { renewName: "session-renew", sessionName: "session" },
                 renewUrl: "http://api:4002/auth/renew",
             });
             const request = new NextRequest("https://0.0.0.0:4001/account", {
@@ -170,7 +170,7 @@ describe("Next adapter", () => {
 
         try {
             const auth = createNextAuth({
-                cookie: { name: "session", renewName: "session-renew" },
+                cookie: { renewName: "session-renew", sessionName: "session" },
                 renewUrl: "http://api:4002/auth/renew",
             });
             const request = new NextRequest("https://0.0.0.0:4001/account", {
@@ -201,7 +201,7 @@ describe("Next adapter", () => {
 
         try {
             const auth = createNextAuth({
-                cookie: { name: "session", renewName: "session-renew" },
+                cookie: { renewName: "session-renew", sessionName: "session" },
                 renewUrl: "https://api.example.com/auth/renew",
             });
 
@@ -223,7 +223,7 @@ describe("Next adapter", () => {
 
     it("reports a missing or malformed session cookie without calling the API", async () => {
         const auth = createNextAuth({
-            cookie: { name: "session", renewName: "session-renew" },
+            cookie: { renewName: "session-renew", sessionName: "session" },
             renewUrl: "https://api.example.com/auth/renew",
         });
         const missing = await auth.renew({
@@ -251,7 +251,7 @@ describe("Next adapter", () => {
         assert.throws(
             () =>
                 createNextAuth({
-                    cookie: { name: "invalid cookie" },
+                    cookie: { sessionName: "invalid cookie" },
                     renewUrl: "https://api.example.com/auth/renew",
                 }),
             (error) => isAuthError(error) && error.code === "AUTH_CONFIG_INVALID",
@@ -259,7 +259,7 @@ describe("Next adapter", () => {
         assert.throws(
             () =>
                 createNextAuth({
-                    cookie: { name: "session", renewName: "session" },
+                    cookie: { renewName: "session", sessionName: "session" },
                     renewUrl: "https://api.example.com/auth/renew",
                 }),
             (error) => isAuthError(error) && error.code === "AUTH_CONFIG_INVALID",

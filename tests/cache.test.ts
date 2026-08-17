@@ -63,8 +63,33 @@ describe("signed session cache", () => {
     it("resolves an authentic cache bound to the token and client", () => {
         const { cache } = createCache();
         const cached = cache.create({ resolved, token });
+        const separator = cached.value.indexOf(".");
+
+        assert.notEqual(separator, -1);
+
+        const body = cached.value.slice(0, separator);
+        const payload: unknown = JSON.parse(Buffer.from(body, "base64url").toString("utf8"));
 
         assert.equal(cached.expires_at.toISOString(), "2026-08-17T10:01:00.000Z");
+        assert.deepEqual(payload, {
+            acc: {
+                email: resolved.account.email,
+                id: resolved.account.id,
+                name: resolved.account.name,
+                role: resolved.account.role,
+                status: resolved.account.status,
+                timezone: resolved.account.timezone,
+                usr: resolved.user,
+            },
+            exp: cached.expires_at.getTime(),
+            ses: {
+                client: resolved.session.client,
+                created_at: resolved.session.created_at.getTime(),
+                exp: resolved.session.expires_at.getTime(),
+                id: resolved.session.id,
+                ren: resolved.session.renew_at.getTime(),
+            },
+        });
         assert.deepEqual(cache.resolve({ client, token, value: cached.value }), resolved);
         assert.equal(
             cache.resolve({ client, token: "b".repeat(43), value: cached.value }),

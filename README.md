@@ -210,9 +210,9 @@ export const auth = createHonoAuth({
 The resolved cookie names are exposed on the auth instance, including defaults:
 
 ```ts
-auth.cookie.name;      // "__sec"
-auth.cookie.cacheName; // "__cac"
-auth.cookie.renewName; // "__ren"
+auth.cookie.sessionName; // "__ses"
+auth.cookie.cacheName;   // "__cac"
+auth.cookie.renewName;   // "__ren"
 ```
 
 ```ts
@@ -485,11 +485,11 @@ renew_at    = min((updated_at ?? created_at) + renewInterval, maxExpiresAt)
 cookie: {
     cacheName: "__cac",
     domain: undefined,
-    name: "__sec",
     path: "/",
     renewName: "__ren",
     sameSite: "Lax",
     secure: true,
+    sessionName: "__ses",
 }
 ```
 
@@ -499,7 +499,7 @@ cookie: {
 - The cache cookie contains the signed snapshot and expires after `cache.ttl`.
 - The renewal cookie contains the authoritative `renew_at` as Unix seconds and expires with the session cookie.
 - The renewal timestamp is an untrusted scheduling hint. It never authenticates or extends a session.
-- Cookie names default to `__sec`, `__cac`, and `__ren`.
+- Cookie names default to `__ses`, `__cac`, and `__ren`.
 - All three names must be valid and unique.
 
 - `__Host-` requires `secure: true`, `path: "/"`, and no domain.
@@ -528,6 +528,32 @@ The cache payload:
 - compares the same configured IP, User-Agent, and platform fields on every hit;
 - never extends the authoritative session expiry;
 - is accepted only for `GET` and `HEAD` requests.
+
+The signed value uses a compact internal payload:
+
+```ts
+{
+    exp: cacheExpiresAt,
+    acc: {
+        id,
+        email,
+        name,
+        role,
+        status,
+        timezone,
+        usr: { id, role, status },
+    },
+    ses: {
+        id,
+        client: { ip, agent, platform },
+        created_at,
+        exp: expiresAt,
+        ren: renewAt,
+    },
+}
+```
+
+`account_id` is not duplicated in the cookie. After signature validation, the adapter rebuilds `session.account_id` from `acc.id`, so the public `session` object is unchanged. The cache is signed but not encrypted; never place passwords, hashes, raw session tokens, or application secrets in it.
 
 An absent, expired, malformed, altered, token-mismatched, or client-mismatched cache is a cache miss. The adapter then performs normal database authentication. A real configured client mismatch is therefore still detected and revoked by the database session service.
 

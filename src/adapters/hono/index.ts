@@ -27,11 +27,11 @@ export type HonoAuthEnv = Env & {
 export type HonoCookieConfig = {
     cacheName?: string;
     domain?: string;
-    name?: string;
     path?: string;
     renewName?: string;
     sameSite?: "Strict" | "Lax" | "None";
     secure?: boolean;
+    sessionName?: string;
 };
 
 export type HonoGetIp = (
@@ -182,11 +182,11 @@ export const createHonoAdapter = ({
     });
 
     const getToken = (c: Context): string | null => {
-        return parseSessionToken(getCookie(c, resolved.names.name));
+        return parseSessionToken(getCookie(c, resolved.names.sessionName));
     };
 
     const setSession = ({ context, session: value, token }: SetSessionInput): void => {
-        setCookie(context, resolved.names.name, token, {
+        setCookie(context, resolved.names.sessionName, token, {
             ...resolved.options,
             expires: value.expires_at,
         });
@@ -215,7 +215,7 @@ export const createHonoAdapter = ({
     };
 
     const clearSession = (c: Context): void => {
-        deleteCookie(c, resolved.names.name, resolved.options);
+        deleteCookie(c, resolved.names.sessionName, resolved.options);
         deleteCookie(c, resolved.names.cacheName, resolved.options);
         deleteCookie(c, resolved.names.renewName, resolved.options);
     };

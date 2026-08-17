@@ -8,8 +8,8 @@ import {
 } from "../../session/cookie.js";
 
 export type NextCookieConfig = {
-    name?: string;
     renewName?: string;
+    sessionName?: string;
 };
 
 export type NextAuthConfig = {
@@ -33,8 +33,8 @@ export type NextAuth = {
 };
 
 type ForwardHeadersInput = {
-    name: string;
     request: NextRequest;
+    sessionName: string;
     token: string;
 };
 
@@ -70,8 +70,8 @@ const getSetCookies = (headers: Headers): string[] => {
     return cookie ? [cookie] : [];
 };
 
-const getForwardHeaders = ({ name, request, token }: ForwardHeadersInput): Headers => {
-    const headers = new Headers({ cookie: `${name}=${token}` });
+const getForwardHeaders = ({ request, sessionName, token }: ForwardHeadersInput): Headers => {
+    const headers = new Headers({ cookie: `${sessionName}=${token}` });
 
     for (const header of FORWARD_HEADERS) {
         const value = request.headers.get(header);
@@ -115,7 +115,7 @@ export const createNextAuth = ({ cookie, renewUrl }: NextAuthConfig): NextAuth =
 
     return {
         renew: async ({ request, response }) => {
-            const token = parseSessionToken(request.cookies.get(names.name)?.value);
+            const token = parseSessionToken(request.cookies.get(names.sessionName)?.value);
 
             if (!token) {
                 return {
@@ -137,7 +137,7 @@ export const createNextAuth = ({ cookie, renewUrl }: NextAuthConfig): NextAuth =
 
             const renewal = await fetch(url.toString(), {
                 cache: "no-store",
-                headers: getForwardHeaders({ name: names.name, request, token }),
+                headers: getForwardHeaders({ request, sessionName: names.sessionName, token }),
                 method: "POST",
                 redirect: "error",
                 signal: AbortSignal.timeout(RENEW_TIMEOUT),

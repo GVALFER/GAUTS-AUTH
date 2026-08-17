@@ -75,6 +75,12 @@ const BCRYPT_DEFAULTS = {
     verifyMaxBytes: 72,
 } as const;
 
+export const COOKIE_DEFAULTS = {
+    cacheName: "__cac",
+    renewName: "__ren",
+    sessionName: "__ses",
+} as const;
+
 const SESSION_DEFAULTS = {
     maxLifetime: 60 * 60 * 24 * 30,
     renewInterval: 60 * 60 * 24,

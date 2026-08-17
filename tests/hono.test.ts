@@ -116,9 +116,9 @@ const createApp = ({ auth, cache = false }: { auth: Auth; cache?: boolean }) => 
         auth,
         cookie: {
             cacheName: "session-cache",
-            name: "session",
             renewName: "session-renew",
             secure: false,
+            sessionName: "session",
         },
         getIp: (c) => c.req.header("x-forwarded-for"),
         ...(cache
@@ -170,13 +170,13 @@ describe("Hono adapter", () => {
 
         assert.deepEqual(defaults.cookie, {
             cacheName: "__cac",
-            name: "__sec",
             renewName: "__ren",
+            sessionName: "__ses",
         });
         assert.deepEqual(adapter.cookie, {
             cacheName: "session-cache",
-            name: "session",
             renewName: "session-renew",
+            sessionName: "session",
         });
     });
 
@@ -484,7 +484,7 @@ describe("Hono adapter", () => {
             () =>
                 createHonoAdapter({
                     auth,
-                    cookie: { name: "__Host-session", secure: false },
+                    cookie: { secure: false, sessionName: "__Host-session" },
                     getIp: () => null,
                 }),
             (error) => isAuthError(error) && error.code === "AUTH_CONFIG_INVALID",

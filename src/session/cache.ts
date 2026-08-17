@@ -3,8 +3,8 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import { matchesClient, normalizeClient, type SessionClientInput } from "../client/index.js";
 import type { ResolvedSessionConfig } from "../config.js";
 import { createError } from "../errors.js";
-import { isAuthAccount, isNullableString, isRecord } from "./guards.js";
-import type { ResolvedSession, Session } from "./types.js";
+import { isAuthUser, isNullableString, isRecord } from "./guards.js";
+import type { AuthAccount, AuthUser, ResolvedSession, Session } from "./types.js";
 
 export type SessionCacheConfig = {
     ttl: number;
@@ -33,17 +33,27 @@ type SessionCacheValue = {
     value: string;
 };
 
-type StoredSession = Omit<Session, "created_at" | "expires_at" | "renew_at"> & {
+type StoredAccount = Omit<AuthAccount, "user"> & {
+    usr: AuthUser;
+};
+
+type StoredSession = {
+    client: Session["client"];
     created_at: number;
-    expires_at: number;
-    renew_at: number;
+    exp: number;
+    id: string;
+    ren: number;
+};
+
+type ToSessionInput = {
+    account_id: string;
+    stored: StoredSession;
 };
 
 type CachePayload = {
-    account: ResolvedSession["account"];
-    cache_expires_at: number;
-    session: StoredSession;
-    version: 1;
+    acc: StoredAccount;
+    exp: number;
+    ses: StoredSession;
 };
 
 export type SessionCache = {
@@ -83,33 +93,43 @@ const matchesSignature = ({ body, secret, signature, token }: MatchesSignature):
     return expected.byteLength === received.byteLength && timingSafeEqual(expected, received);
 };
 
+const isStoredAccount = (value: unknown): value is StoredAccount => {
+    return (
+        isRecord(value) &&
+        typeof value.email === "string" &&
+        typeof value.id === "string" &&
+        typeof value.name === "string" &&
+        typeof value.role === "string" &&
+        typeof value.status === "string" &&
+        isNullableString(value.timezone) &&
+        isAuthUser(value.usr)
+    );
+};
+
 const isStoredSession = (value: unknown): value is StoredSession => {
     return (
         isRecord(value) &&
-        typeof value.account_id === "string" &&
         isRecord(value.client) &&
         isNullableString(value.client.agent) &&
         isNullableString(value.client.ip) &&
         isNullableString(value.client.platform) &&
         typeof value.created_at === "number" &&
         Number.isSafeInteger(value.created_at) &&
-        typeof value.expires_at === "number" &&
-        Number.isSafeInteger(value.expires_at) &&
+        typeof value.exp === "number" &&
+        Number.isSafeInteger(value.exp) &&
         typeof value.id === "string" &&
-        typeof value.renew_at === "number" &&
-        Number.isSafeInteger(value.renew_at)
+        typeof value.ren === "number" &&
+        Number.isSafeInteger(value.ren)
     );
 };
 
 const isCachePayload = (value: unknown): value is CachePayload => {
     return (
         isRecord(value) &&
-        value.version === 1 &&
-        isAuthAccount(value.account) &&
-        typeof value.cache_expires_at === "number" &&
-        Number.isSafeInteger(value.cache_expires_at) &&
-        isStoredSession(value.session) &&
-        value.session.account_id === value.account.id
+        isStoredAccount(value.acc) &&
+        typeof value.exp === "number" &&
+        Number.isSafeInteger(value.exp) &&
+        isStoredSession(value.ses)
     );
 };
 
@@ -122,18 +142,41 @@ const parsePayload = (body: string): CachePayload | null => {
     }
 };
 
-const toSession = (stored: StoredSession): Session => ({
-    ...stored,
+const toAccount = (stored: StoredAccount): AuthAccount => ({
+    email: stored.email,
+    id: stored.id,
+    name: stored.name,
+    role: stored.role,
+    status: stored.status,
+    timezone: stored.timezone,
+    user: stored.usr,
+});
+
+const toStoredAccount = (account: AuthAccount): StoredAccount => ({
+    email: account.email,
+    id: account.id,
+    name: account.name,
+    role: account.role,
+    status: account.status,
+    timezone: account.timezone,
+    usr: account.user,
+});
+
+const toSession = ({ account_id, stored }: ToSessionInput): Session => ({
+    account_id,
+    client: stored.client,
     created_at: new Date(stored.created_at),
-    expires_at: new Date(stored.expires_at),
-    renew_at: new Date(stored.renew_at),
+    expires_at: new Date(stored.exp),
+    id: stored.id,
+    renew_at: new Date(stored.ren),
 });
 
 const toStoredSession = (session: Session): StoredSession => ({
-    ...session,
+    client: session.client,
     created_at: session.created_at.getTime(),
-    expires_at: session.expires_at.getTime(),
-    renew_at: session.renew_at.getTime(),
+    exp: session.expires_at.getTime(),
+    id: session.id,
+    ren: session.renew_at.getTime(),
 });
 
 export const createSessionCache = ({
@@ -169,10 +212,9 @@ export const createSessionCache = ({
             );
 
             const payload: CachePayload = {
-                account: resolved.account,
-                cache_expires_at: expires_at.getTime(),
-                session: toStoredSession(resolved.session),
-                version: 1,
+                acc: toStoredAccount(resolved.account),
+                exp: expires_at.getTime(),
+                ses: toStoredSession(resolved.session),
             };
 
             const body = Buffer.from(JSON.stringify(payload)).toString("base64url");
@@ -202,16 +244,20 @@ export const createSessionCache = ({
             }
 
             const current = now().getTime();
-            const resolvedSession = toSession(payload.session);
+            const account = toAccount(payload.acc);
+            const resolvedSession = toSession({
+                account_id: account.id,
+                stored: payload.ses,
+            });
             const max_expires_at =
                 resolvedSession.created_at.getTime() + sessionConfig.maxLifetime * 1000;
 
             if (
-                payload.cache_expires_at <= current ||
+                payload.exp <= current ||
                 resolvedSession.expires_at.getTime() <= current ||
                 max_expires_at <= current ||
-                payload.cache_expires_at > resolvedSession.expires_at.getTime() ||
-                payload.cache_expires_at > max_expires_at ||
+                payload.exp > resolvedSession.expires_at.getTime() ||
+                payload.exp > max_expires_at ||
                 resolvedSession.expires_at.getTime() > max_expires_at ||
                 !matchesClient({
                     current: normalizeClient(client),
@@ -223,9 +269,9 @@ export const createSessionCache = ({
             }
 
             return {
-                account: payload.account,
+                account,
                 session: resolvedSession,
-                user: payload.account.user,
+                user: account.user,
             };
         },
     };

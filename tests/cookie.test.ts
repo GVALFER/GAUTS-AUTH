@@ -24,19 +24,19 @@ describe("session cookies", () => {
     it("resolves separate session, cache, and renewal names", () => {
         assert.deepEqual(resolveSessionCookieNames(), {
             cacheName: "__cac",
-            name: "__sec",
             renewName: "__ren",
+            sessionName: "__ses",
         });
         assert.deepEqual(
             resolveSessionCookieNames({
                 cacheName: "__admin_cac",
-                name: "__admin_sec",
                 renewName: "__admin_ren",
+                sessionName: "__admin_sec",
             }),
             {
                 cacheName: "__admin_cac",
-                name: "__admin_sec",
                 renewName: "__admin_ren",
+                sessionName: "__admin_sec",
             },
         );
     });
@@ -64,7 +64,11 @@ describe("session cookies", () => {
             (error) => isAuthError(error) && error.code === "AUTH_CONFIG_INVALID",
         );
         assert.throws(
-            () => resolveSessionCookieNames({ name: "session", cacheName: "session" }),
+            () =>
+                resolveSessionCookieNames({
+                    cacheName: "session",
+                    sessionName: "session",
+                }),
             (error) => isAuthError(error) && error.code === "AUTH_CONFIG_INVALID",
         );
     });
