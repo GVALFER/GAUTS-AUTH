@@ -6,31 +6,31 @@ Database-backed password authentication, opaque browser sessions, and optional s
 
 ## Features
 
-| Capability                         | Support | Default             |
-| ---------------------------------- | :-----: | ------------------- |
-| Argon2id password hashing          |   ✅    | Enabled             |
-| bcrypt password hashing            |   ✅    | Opt-in              |
-| Opaque server-side sessions        |   ✅    | Enabled             |
-| Database-backed validation         |   ✅    | Enabled             |
-| Sliding session renewal            |   ✅    | Every 24 hours      |
-| Absolute session lifetime          |   ✅    | 30 days             |
-| Signed browser cache               |   ✅    | Disabled            |
-| Full User-Agent validation         |   ✅    | Enabled             |
-| IP validation                      |   ✅    | Disabled            |
-| Platform validation                |   ✅    | Disabled            |
-| Hono adapter                       |   ✅    | Available           |
-| Prisma adapter                     |   ✅    | Available           |
-| Next.js renewal adapter            |   ✅    | Available           |
-| Google social authentication       |   ✅    | Opt-in              |
-| GitHub social authentication       |   ✅    | Opt-in              |
-| X social authentication            |   ✅    | Opt-in              |
-| Social account registration        |   ✅    | Disabled            |
-| Session listing and revocation     |   ✅    | Available           |
-| Token rotation                     |   ❌    | Stable opaque token |
-| JWT sessions                       |   ❌    | Not used            |
-| Redis requirement                  |   ❌    | Not required        |
-| OTP and transactional email        |   ❌    | Application-owned   |
-| Route roles and permissions        |   ❌    | Application-owned   |
+| Capability                     | Support | Default             |
+| ------------------------------ | :-----: | ------------------- |
+| Argon2id password hashing      |   ✅    | Enabled             |
+| bcrypt password hashing        |   ✅    | Opt-in              |
+| Opaque server-side sessions    |   ✅    | Enabled             |
+| Database-backed validation     |   ✅    | Enabled             |
+| Sliding session renewal        |   ✅    | Every 24 hours      |
+| Absolute session lifetime      |   ✅    | 30 days             |
+| Signed browser cache           |   ✅    | Disabled            |
+| Full User-Agent validation     |   ✅    | Enabled             |
+| IP validation                  |   ✅    | Disabled            |
+| Platform validation            |   ✅    | Disabled            |
+| Hono adapter                   |   ✅    | Available           |
+| Prisma adapter                 |   ✅    | Available           |
+| Next.js renewal adapter        |   ✅    | Available           |
+| Google social authentication   |   ✅    | Opt-in              |
+| GitHub social authentication   |   ✅    | Opt-in              |
+| X social authentication        |   ✅    | Opt-in              |
+| Social account registration    |   ✅    | Disabled            |
+| Session listing and revocation |   ✅    | Available           |
+| Token rotation                 |   ❌    | Stable opaque token |
+| JWT sessions                   |   ❌    | Not used            |
+| Redis requirement              |   ❌    | Not required        |
+| OTP and transactional email    |   ❌    | Application-owned   |
+| Route roles and permissions    |   ❌    | Application-owned   |
 
 “Session renewal” extends the existing session expiry when activity continues. It is not a refresh-token flow and does not rotate the opaque browser token.
 
@@ -227,7 +227,7 @@ export const nextAuth = createNextAuth({
 });
 ```
 
-Call it from the Next.js proxy on protected routes:
+Call it from the Next.js middleware (proxy.ts) on protected routes:
 
 ```ts
 import type { NextRequest } from "next/server";
@@ -274,16 +274,16 @@ The frontend does not receive `AUTH_SECRET`. The API remains responsible for ses
 
 ### `createHonoAuth()`
 
-| Property   | Type / allowed values |        Required         | Default           | Description                                                                                         |
-| ---------- | --------------------- | :---------------------: | ----------------- | --------------------------------------------------------------------------------------------------- |
-| `db`       | `DbAdapter`           |           ✅            | —                 | Authoritative session persistence and account loading.                                              |
-| `getIp`    | `HonoGetIp`           | Only with IP validation | Omitted           | Returns the client IP from a source trusted by the application. May be synchronous or asynchronous. |
-| `password` | `PasswordConfig`      |           ❌            | Argon2id defaults | Password hashing and verification configuration.                                                    |
-| `session`  | `SessionConfig`       |           ❌            | Session defaults  | Expiry, renewal, and client validation configuration.                                               |
-| `cookie`   | `HonoCookieConfig`    |           ❌            | Cookie defaults   | Names, domain, path, SameSite, and Secure settings.                                                 |
-| `cache`    | `{ ttl: number }`     |           ❌            | Disabled          | Enables the short signed browser cache.                                                             |
-| `secret`   | `string`              | With `cache` or `social` | —                | HMAC secret for signed authentication data. Minimum 32 UTF-8 bytes.                                 |
-| `social`   | `SocialConfig`        |           ❌            | Disabled          | Enables configured social providers, redirects, and optional registration.                         |
+| Property   | Type / allowed values |         Required         | Default           | Description                                                                                         |
+| ---------- | --------------------- | :----------------------: | ----------------- | --------------------------------------------------------------------------------------------------- |
+| `db`       | `DbAdapter`           |            ✅            | —                 | Authoritative session persistence and account loading.                                              |
+| `getIp`    | `HonoGetIp`           | Only with IP validation  | Omitted           | Returns the client IP from a source trusted by the application. May be synchronous or asynchronous. |
+| `password` | `PasswordConfig`      |            ❌            | Argon2id defaults | Password hashing and verification configuration.                                                    |
+| `session`  | `SessionConfig`       |            ❌            | Session defaults  | Expiry, renewal, and client validation configuration.                                               |
+| `cookie`   | `HonoCookieConfig`    |            ❌            | Cookie defaults   | Names, domain, path, SameSite, and Secure settings.                                                 |
+| `cache`    | `{ ttl: number }`     |            ❌            | Disabled          | Enables the short signed browser cache.                                                             |
+| `secret`   | `string`              | With `cache` or `social` | —                 | HMAC secret for signed authentication data. Minimum 32 UTF-8 bytes.                                 |
+| `social`   | `SocialConfig`        |            ❌            | Disabled          | Enables configured social providers, redirects, and optional registration.                          |
 
 ```ts
 type HonoGetIp = (c: Context) => Promise<string | null | undefined> | string | null | undefined;
@@ -546,17 +546,17 @@ const db = createPrismaAdapter({
 });
 ```
 
-| Property                 | Type / allowed values                   | Required | Default                | Description                                                               |
-| ------------------------ | --------------------------------------- | :------: | ---------------------- | ------------------------------------------------------------------------- |
-| `client`                 | Generated Prisma client                 |    ✅    | —                      | Prisma client containing the four auth models.                            |
-| `models.users.table`     | Compatible user delegate name           |    ❌    | `"users"`              | Overrides the user delegate.                                              |
-| `models.users.select`    | Unique scalar field array               |    ❌    | `[]`                   | Adds payload fields; `id` and `name` are always included.                 |
-| `models.users.access`    | Scalar equality or allowed-value arrays |    ❌    | `{}`                   | Conditions required on the owning user/entity.                            |
-| `models.accounts.table`  | Compatible account delegate name        |    ❌    | `"user_accounts"`      | Overrides the account delegate.                                           |
-| `models.accounts.select` | Unique scalar field array               |    ❌    | `[]`                   | Adds payload fields; `id` and `email` are always included.                |
-| `models.accounts.access` | Scalar equality or allowed-value arrays |    ❌    | `{}`                   | Conditions required on the authenticating account.                        |
-| `models.sessions.table`  | Compatible session delegate name        |    ❌    | `"account_sessions"`   | Overrides authoritative session persistence.                              |
-| `models.socials.table`   | Compatible social delegate name         |    ❌    | `"social_accounts"`    | Overrides provider association persistence.                               |
+| Property                 | Type / allowed values                   | Required | Default              | Description                                                |
+| ------------------------ | --------------------------------------- | :------: | -------------------- | ---------------------------------------------------------- |
+| `client`                 | Generated Prisma client                 |    ✅    | —                    | Prisma client containing the four auth models.             |
+| `models.users.table`     | Compatible user delegate name           |    ❌    | `"users"`            | Overrides the user delegate.                               |
+| `models.users.select`    | Unique scalar field array               |    ❌    | `[]`                 | Adds payload fields; `id` and `name` are always included.  |
+| `models.users.access`    | Scalar equality or allowed-value arrays |    ❌    | `{}`                 | Conditions required on the owning user/entity.             |
+| `models.accounts.table`  | Compatible account delegate name        |    ❌    | `"user_accounts"`    | Overrides the account delegate.                            |
+| `models.accounts.select` | Unique scalar field array               |    ❌    | `[]`                 | Adds payload fields; `id` and `email` are always included. |
+| `models.accounts.access` | Scalar equality or allowed-value arrays |    ❌    | `{}`                 | Conditions required on the authenticating account.         |
+| `models.sessions.table`  | Compatible session delegate name        |    ❌    | `"account_sessions"` | Overrides authoritative session persistence.               |
+| `models.socials.table`   | Compatible social delegate name         |    ❌    | `"social_accounts"`  | Overrides provider association persistence.                |
 
 `select` accepts JSON-safe scalar fields and receives autocomplete from the generated Prisma client. `password`, `hash`, `password_hash`, and `passwordHash` are rejected by both TypeScript and runtime validation. Never select tokens or other secrets because the optional cache is signed, not encrypted.
 
@@ -693,15 +693,15 @@ await auth.createSession({
 
 ### Methods
 
-| Method                                        | Purpose                                                                    |
-| --------------------------------------------- | -------------------------------------------------------------------------- |
+| Method                                                  | Purpose                                                                                           |
+| ------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
 | `auth.createSession({ account_id, context, country? })` | Creates the DB session and writes the browser cookies. `country` is optional login-time metadata. |
-| `auth.resolveSession(context)`                | Resolves a request and returns the selected account and session.           |
-| `auth.renewSession(context)`                  | Performs DB validation, renews when due, and writes authoritative cookies. |
-| `auth.revokeSession(context)`                 | Revokes the current DB session and clears cookies.                         |
-| `auth.clearSession(context)`                  | Clears browser cookies without revoking the DB session.                    |
-| `auth.getToken(context)`                      | Returns the validated opaque token from the request cookie.                |
-| `auth.requireSession`                         | Hono middleware that authenticates and populates the context.              |
+| `auth.resolveSession(context)`                          | Resolves a request and returns the selected account and session.                                  |
+| `auth.renewSession(context)`                            | Performs DB validation, renews when due, and writes authoritative cookies.                        |
+| `auth.revokeSession(context)`                           | Revokes the current DB session and clears cookies.                                                |
+| `auth.clearSession(context)`                            | Clears browser cookies without revoking the DB session.                                           |
+| `auth.getToken(context)`                                | Returns the validated opaque token from the request cookie.                                       |
+| `auth.requireSession`                                   | Hono middleware that authenticates and populates the context.                                     |
 
 `requireSession` authenticates only. Application-specific route permissions remain the application's responsibility.
 
@@ -767,23 +767,23 @@ The package does not create or mount routes. Applications may wrap `auth.social.
 
 ### Social configuration
 
-| Property                     | Type / allowed values                 | Required | Default       | Description                                                                  |
-| ---------------------------- | ------------------------------------- | :------: | ------------- | ---------------------------------------------------------------------------- |
-| `social.providers`           | `SocialProvider[]`                    |    ✅    | —             | Configured Google, GitHub, or X providers.                                   |
-| `social.successUrl`          | Absolute HTTP(S) URL                  |    ✅    | —             | Fixed redirect after session creation.                                       |
-| `social.errorUrl`            | Absolute HTTP(S) URL                  |    ✅    | —             | Fixed redirect for expected provider/authentication failures.                |
-| `social.cookieName`          | Valid cookie name                     |    ❌    | `"__soc"`     | Signed temporary OAuth/registration transaction cookie.                      |
-| `social.registration`        | `SocialRegistrationConfig`            |    ❌    | Disabled      | Enables default or application-specific social registration.                 |
-| `registration.registerUrl`   | Absolute HTTP(S) URL                  |    ❌    | Direct        | Defers account creation to an application form.                              |
-| `registration.createAccount` | Async callback returning `accountId`  | Conditional | Built-in   | Creates required business data when the default structure is insufficient.   |
+| Property                     | Type / allowed values                |  Required   | Default   | Description                                                                |
+| ---------------------------- | ------------------------------------ | :---------: | --------- | -------------------------------------------------------------------------- |
+| `social.providers`           | `SocialProvider[]`                   |     ✅      | —         | Configured Google, GitHub, or X providers.                                 |
+| `social.successUrl`          | Absolute HTTP(S) URL                 |     ✅      | —         | Fixed redirect after session creation.                                     |
+| `social.errorUrl`            | Absolute HTTP(S) URL                 |     ✅      | —         | Fixed redirect for expected provider/authentication failures.              |
+| `social.cookieName`          | Valid cookie name                    |     ❌      | `"__soc"` | Signed temporary OAuth/registration transaction cookie.                    |
+| `social.registration`        | `SocialRegistrationConfig`           |     ❌      | Disabled  | Enables default or application-specific social registration.               |
+| `registration.registerUrl`   | Absolute HTTP(S) URL                 |     ❌      | Direct    | Defers account creation to an application form.                            |
+| `registration.createAccount` | Async callback returning `accountId` | Conditional | Built-in  | Creates required business data when the default structure is insufficient. |
 
 Provider configuration:
 
-| Property       | Type                 | Required | Description                                                  |
-| -------------- | -------------------- | :------: | ------------------------------------------------------------ |
-| `clientId`     | Non-empty string     |    ✅    | Public OAuth client identifier.                              |
-| `clientSecret` | Non-empty string     |    ✅    | Server-only OAuth client secret.                             |
-| `callbackUrl`  | Absolute HTTP(S) URL |    ✅    | Exact public callback URL registered with the provider.      |
+| Property       | Type                 | Required | Description                                             |
+| -------------- | -------------------- | :------: | ------------------------------------------------------- |
+| `clientId`     | Non-empty string     |    ✅    | Public OAuth client identifier.                         |
+| `clientSecret` | Non-empty string     |    ✅    | Server-only OAuth client secret.                        |
+| `callbackUrl`  | Absolute HTTP(S) URL |    ✅    | Exact public callback URL registered with the provider. |
 
 The normalized verified identity is:
 
@@ -1039,21 +1039,21 @@ type AuthErrorCode =
 
 Use `isAuthError(error)` before reading `error.code`.
 
-| Code                      | Suggested HTTP status | Meaning                                                           |
-| ------------------------- | --------------------: | ----------------------------------------------------------------- |
-| `AUTH_CONFIG_INVALID`     |                 `500` | Invalid startup configuration.                                    |
-| `SOCIAL_ACCOUNT_INVALID` |                 `403` | Linked account or owning user failed configured access rules.      |
-| `SOCIAL_ACCOUNT_NOT_FOUND` |               `401` | Provider identity is not linked and registration is unavailable.  |
-| `SOCIAL_EMAIL_INVALID`   |                 `400` | Provider did not return a verified usable email address.           |
-| `SOCIAL_PROVIDER_ERROR`  |                 `401` | Provider denied or failed the OAuth exchange.                      |
-| `SOCIAL_REGISTRATION_INVALID` |            `400` | Custom registration did not return a valid account ID.             |
-| `SOCIAL_STATE_INVALID`   |                 `400` | OAuth/registration state is missing, altered, or expired.          |
-| `PASSWORD_INPUT_INVALID`  |                 `400` | Password input violates configured limits.                        |
-| `SESSION_CLIENT_MISMATCH` |                 `403` | A configured client field does not match; the session is revoked. |
-| `SESSION_DATA_INVALID`    |                 `400` | Invalid session or renewal data.                                  |
-| `SESSION_INVALID`         |                 `401` | Missing, expired, revoked, or unknown session.                    |
-| `SESSION_NOT_FOUND`       |                 `404` | Requested session does not exist for the account.                 |
-| `DB_UNAVAILABLE`          |                 `503` | Database operation failed. Authentication fails closed.           |
+| Code                          | Suggested HTTP status | Meaning                                                           |
+| ----------------------------- | --------------------: | ----------------------------------------------------------------- |
+| `AUTH_CONFIG_INVALID`         |                 `500` | Invalid startup configuration.                                    |
+| `SOCIAL_ACCOUNT_INVALID`      |                 `403` | Linked account or owning user failed configured access rules.     |
+| `SOCIAL_ACCOUNT_NOT_FOUND`    |                 `401` | Provider identity is not linked and registration is unavailable.  |
+| `SOCIAL_EMAIL_INVALID`        |                 `400` | Provider did not return a verified usable email address.          |
+| `SOCIAL_PROVIDER_ERROR`       |                 `401` | Provider denied or failed the OAuth exchange.                     |
+| `SOCIAL_REGISTRATION_INVALID` |                 `400` | Custom registration did not return a valid account ID.            |
+| `SOCIAL_STATE_INVALID`        |                 `400` | OAuth/registration state is missing, altered, or expired.         |
+| `PASSWORD_INPUT_INVALID`      |                 `400` | Password input violates configured limits.                        |
+| `SESSION_CLIENT_MISMATCH`     |                 `403` | A configured client field does not match; the session is revoked. |
+| `SESSION_DATA_INVALID`        |                 `400` | Invalid session or renewal data.                                  |
+| `SESSION_INVALID`             |                 `401` | Missing, expired, revoked, or unknown session.                    |
+| `SESSION_NOT_FOUND`           |                 `404` | Requested session does not exist for the account.                 |
+| `DB_UNAVAILABLE`              |                 `503` | Database operation failed. Authentication fails closed.           |
 
 The package throws typed errors but does not choose application HTTP responses.
 
