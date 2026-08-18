@@ -241,7 +241,7 @@ export type PrismaDb<
 export type CreatePrismaAdapter = {
     <Client extends object>(input: PrismaAdapterInput<Client>): PrismaDb<Client, undefined>;
     <Client extends object, const Models extends PrismaModelsConfig<Client>>(
-        input: PrismaAdapterInput<Client, Models>,
+        input: { client: Client; models: Models },
     ): PrismaDb<Client, Models>;
 };
 
