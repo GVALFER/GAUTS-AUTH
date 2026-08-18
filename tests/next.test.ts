@@ -159,6 +159,51 @@ describe("Next adapter", () => {
         }
     });
 
+    it("applies renewal cookies to the application unauthorized response", async () => {
+        const originalFetch = globalThis.fetch;
+        globalThis.fetch = async () => {
+            const headers = new Headers();
+            headers.append("Set-Cookie", "session=; Max-Age=0; Path=/; HttpOnly");
+            headers.append("Set-Cookie", "session-renew=; Max-Age=0; Path=/; HttpOnly");
+
+            return new Response(null, { headers, status: 401 });
+        };
+
+        try {
+            const auth = createNextAuth({
+                cookie: { renewName: "session-renew", sessionName: "session" },
+                renewUrl: "https://api.example.com/auth/renew",
+            });
+            const result = await auth.renew({
+                onUnauthorized: () =>
+                    NextResponse.redirect("https://admin.example.com/auth/login"),
+                request: createRequest({ renewAt: null }),
+                response: NextResponse.next(),
+            });
+
+            assert.equal(result.attempted, true);
+            assert.equal(result.status, 401);
+            assert.equal(result.response.status, 307);
+            assert.equal(
+                result.response.headers.get("location"),
+                "https://admin.example.com/auth/login",
+            );
+            assert.deepEqual(
+                (
+                    result.response.headers as Headers & {
+                        getSetCookie: () => string[];
+                    }
+                ).getSetCookie(),
+                [
+                    "session=; Max-Age=0; Path=/; HttpOnly",
+                    "session-renew=; Max-Age=0; Path=/; HttpOnly",
+                ],
+            );
+        } finally {
+            globalThis.fetch = originalFetch;
+        }
+    });
+
     it("derives the public origin from the forwarded host", async () => {
         const originalFetch = globalThis.fetch;
         let init: RequestInit | undefined;
@@ -260,6 +305,8 @@ describe("Next adapter", () => {
             renewUrl: "https://api.example.com/auth/renew",
         });
         const missing = await auth.renew({
+            onUnauthorized: () =>
+                NextResponse.redirect("https://admin.example.com/auth/login"),
             request: new NextRequest("https://admin.example.com/account"),
             response: NextResponse.next(),
         });
@@ -272,6 +319,7 @@ describe("Next adapter", () => {
 
         assert.equal(missing.attempted, false);
         assert.equal(missing.status, 401);
+        assert.equal(missing.response.status, 307);
         assert.equal(malformed.attempted, false);
         assert.equal(malformed.status, 401);
     });

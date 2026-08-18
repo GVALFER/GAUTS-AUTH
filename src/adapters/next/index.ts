@@ -17,7 +17,10 @@ export type NextAuthConfig = {
     renewUrl: string;
 };
 
+export type NextUnauthorized = () => NextResponse;
+
 export type NextRenewInput = {
+    onUnauthorized?: NextUnauthorized;
     request: NextRequest;
     response: NextResponse;
 };
@@ -36,6 +39,11 @@ type RenewHeadersInput = {
     request: NextRequest;
     sessionName: string;
     token: string;
+};
+
+type CopyCookiesInput = {
+    source: Response;
+    target: NextResponse;
 };
 
 export type BuildForwardHeadersInput = {
@@ -104,6 +112,14 @@ const getSetCookies = (headers: Headers): string[] => {
     return cookie ? [cookie] : [];
 };
 
+const copyCookies = ({ source, target }: CopyCookiesInput): NextResponse => {
+    for (const value of getSetCookies(source.headers)) {
+        target.headers.append("set-cookie", value);
+    }
+
+    return target;
+};
+
 const getRenewHeaders = ({ request, sessionName, token }: RenewHeadersInput): Headers => {
     const headers = buildForwardHeaders({ headers: request.headers });
     headers.set("cookie", `${sessionName}=${token}`);
@@ -133,13 +149,13 @@ export const createNextAuth = ({ cookie, renewUrl }: NextAuthConfig): NextAuth =
     }
 
     return {
-        renew: async ({ request, response }) => {
+        renew: async ({ onUnauthorized, request, response }) => {
             const token = parseSessionToken(request.cookies.get(names.sessionName)?.value);
 
             if (!token) {
                 return {
                     attempted: false,
-                    response,
+                    response: onUnauthorized ? onUnauthorized() : response,
                     status: 401,
                 };
             }
@@ -162,13 +178,11 @@ export const createNextAuth = ({ cookie, renewUrl }: NextAuthConfig): NextAuth =
                 signal: AbortSignal.timeout(RENEW_TIMEOUT),
             });
 
-            for (const value of getSetCookies(renewal.headers)) {
-                response.headers.append("set-cookie", value);
-            }
+            const target = renewal.status === 401 && onUnauthorized ? onUnauthorized() : response;
 
             return {
                 attempted: true,
-                response,
+                response: copyCookies({ source: renewal, target }),
                 status: renewal.status,
             };
         },
