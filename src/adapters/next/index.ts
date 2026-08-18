@@ -152,6 +152,7 @@ export const createNextAuth = ({ cookie, renewUrl }: NextAuthConfig): NextAuth =
                 unauthorizedUrl
                     ? NextResponse.redirect(new URL(unauthorizedUrl, request.url))
                     : response;
+
             const token = parseSessionToken(request.cookies.get(names.sessionName)?.value);
 
             if (!token) {
@@ -180,8 +181,7 @@ export const createNextAuth = ({ cookie, renewUrl }: NextAuthConfig): NextAuth =
                 signal: AbortSignal.timeout(RENEW_TIMEOUT),
             });
 
-            const target =
-                renewal.status === 401 ? unauthorized() : response;
+            const target = renewal.status === 401 ? unauthorized() : response;
 
             return {
                 attempted: true,
