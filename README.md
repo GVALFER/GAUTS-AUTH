@@ -558,6 +558,7 @@ model sessions {
   account_id  String    @db.VarChar(255)
   token_hash  String    @unique @db.VarChar(64)
   ip          String?   @db.VarChar(45)
+  country     String?   @db.VarChar(2)
   platform    String?   @db.VarChar(255)
   agent       String?   @db.Text
   expires_at  DateTime  @db.Timestamp(0)
@@ -620,13 +621,27 @@ type Session = {
 
 The Prisma adapter refines `AuthAccount` with the exact fields and nested relations declared in `select`.
 
-Only `account_id` is persisted in the session row. Current selected account data and configured relations are loaded through the database relation and never copied into the table.
+Only `account_id` is copied from the account payload into the session row. Current selected account data and configured relations are loaded through the database relation and never copied into the table.
+
+### Login country metadata
+
+An application may resolve a country once during login and persist it with the session:
+
+```ts
+await auth.createSession({
+    account_id: account.id,
+    context: c,
+    country: userInfo.country?.code ?? null,
+});
+```
+
+`country` is normalized to uppercase and is never used for authentication or client matching. It is not resolved by the package and does not trigger GeoIP work during normal requests. When supplied, the configured session model must provide a nullable `country` column. When omitted, the Prisma adapter does not send the field.
 
 ### Methods
 
 | Method                                        | Purpose                                                                    |
 | --------------------------------------------- | -------------------------------------------------------------------------- |
-| `auth.createSession({ account_id, context })` | Creates the DB session and writes the browser cookies.                     |
+| `auth.createSession({ account_id, context, country? })` | Creates the DB session and writes the browser cookies. `country` is optional login-time metadata. |
 | `auth.resolveSession(context)`                | Resolves a request and returns the selected account and session.           |
 | `auth.renewSession(context)`                  | Performs DB validation, renews when due, and writes authoritative cookies. |
 | `auth.revokeSession(context)`                 | Revokes the current DB session and clears cookies.                         |

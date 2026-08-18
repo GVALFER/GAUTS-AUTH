@@ -447,6 +447,7 @@ describe("Hono adapter", () => {
                     ip: "192.0.2.10",
                     platform: "macOS",
                 },
+                country: "PT",
             });
             return { account, session, token };
         };
@@ -462,6 +463,7 @@ describe("Hono adapter", () => {
             const created = await adapter.createSession({
                 account_id: account.id,
                 context: c,
+                country: "PT",
             });
             return c.json({ account_id: created.account_id });
         });

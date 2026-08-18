@@ -30,7 +30,9 @@ export type AuthSessionRecord<TAccount extends AuthAccount = AuthAccount> = Sess
     allowed: boolean;
 };
 
-export type CreateSessionRecord = Omit<SessionRecord, "revoked_at" | "updated_at">;
+export type CreateSessionRecord = Omit<SessionRecord, "revoked_at" | "updated_at"> & {
+    country?: string | null;
+};
 
 export type ActiveSession = Omit<SessionRecord, "token_hash">;
 
@@ -62,6 +64,7 @@ export type RenewedSession<TAccount extends AuthAccount = AuthAccount> =
 export type CreateSession = {
     account_id: string;
     client: SessionClientInput;
+    country?: string | null;
 };
 
 export type SessionInput = {

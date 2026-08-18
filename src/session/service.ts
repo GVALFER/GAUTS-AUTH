@@ -31,6 +31,11 @@ type RevokeRowsInput = {
     rows: SessionRecord[];
 };
 
+const normalizeCountry = (input?: string | null): string | null => {
+    const value = input?.trim().toUpperCase();
+    return value?.length ? value : null;
+};
+
 const toActiveSession = (row: SessionRecord): ActiveSession => ({
     account_id: row.account_id,
     agent: row.agent,
@@ -201,6 +206,7 @@ export const createSessionService = <TAccount extends AuthAccount>({
             );
 
             const token = createToken();
+            const country = normalizeCountry(input.country);
             const row: SessionRecord = {
                 account_id: input.account_id,
                 agent: client.agent,
@@ -224,6 +230,7 @@ export const createSessionService = <TAccount extends AuthAccount>({
                     ip: row.ip,
                     platform: row.platform,
                     token_hash: row.token_hash,
+                    ...(input.country === undefined ? {} : { country }),
                 }),
             );
 

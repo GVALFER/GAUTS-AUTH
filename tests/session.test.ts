@@ -36,9 +36,11 @@ type HarnessConfig = {
     validation?: readonly SessionValidation[];
 };
 
+type StoredSessionRecord = SessionRecord & Pick<CreateSessionRecord, "country">;
+
 const createDb = () => {
     let allowed = true;
-    const rows = new Map<string, SessionRecord>();
+    const rows = new Map<string, StoredSessionRecord>();
     const calls = {
         create: 0,
         find: 0,
@@ -130,6 +132,7 @@ describe("session service", () => {
         const created = await harness.session.create({
             account_id: account.id,
             client,
+            country: " pt ",
         });
         const row = harness.db.rows.get(created.session.id);
 
@@ -141,6 +144,7 @@ describe("session service", () => {
         assert.equal(created.session.account_id, account.id);
         assert.equal(row?.ip, "2001:db8::1");
         assert.equal(row?.agent, client.agent);
+        assert.equal(row?.country, "PT");
         assert.equal(
             created.session.renew_at.toISOString(),
             "2026-08-15T12:01:00.000Z",

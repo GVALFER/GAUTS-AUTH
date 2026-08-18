@@ -285,12 +285,27 @@ describe("Prisma database adapter", () => {
         await db.create({
             account_id: row.account_id,
             agent: row.agent,
+            country: "PT",
             created_at: row.created_at,
             expires_at: row.expires_at,
             id: row.id,
             ip: row.ip,
             platform: row.platform,
             token_hash: row.token_hash,
+        });
+
+        assert.deepEqual(calls.create, {
+            data: {
+                account_id: row.account_id,
+                agent: row.agent,
+                country: "PT",
+                created_at: row.created_at,
+                expires_at: row.expires_at,
+                id: row.id,
+                ip: row.ip,
+                platform: row.platform,
+                token_hash: row.token_hash,
+            },
         });
 
         assert.deepEqual(await db.findToken(row.token_hash), {
@@ -307,6 +322,24 @@ describe("Prisma database adapter", () => {
             },
             where: { token_hash: row.token_hash },
         });
+    });
+
+    it("omits country when the application does not provide login metadata", async () => {
+        const { calls, client } = createClient();
+        const db = createPrismaAdapter({ client });
+
+        await db.create({
+            account_id: row.account_id,
+            agent: row.agent,
+            created_at: row.created_at,
+            expires_at: row.expires_at,
+            id: row.id,
+            ip: row.ip,
+            platform: row.platform,
+            token_hash: row.token_hash,
+        });
+
+        assert.equal(Object.hasOwn((calls.create as { data: object }).data, "country"), false);
     });
 
     it("selects custom account data and applies hidden access fields", async () => {

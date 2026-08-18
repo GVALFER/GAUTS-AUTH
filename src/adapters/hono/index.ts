@@ -70,6 +70,7 @@ export type HonoAuthConfig<TAccount extends AuthAccount = AuthAccount> = HonoAut
 type CreateSessionInput = {
     account_id: string;
     context: Context;
+    country?: string | null;
 };
 
 type SetSessionInput = {
@@ -278,10 +279,15 @@ export const createHonoAdapter = <TAccount extends AuthAccount>({
         return value;
     };
 
-    const createSession = async ({ account_id, context }: CreateSessionInput): Promise<Session> => {
+    const createSession = async ({
+        account_id,
+        context,
+        country,
+    }: CreateSessionInput): Promise<Session> => {
         const created = await auth.session.create({
             account_id,
             client: await getSessionClient(context),
+            ...(country === undefined ? {} : { country }),
         });
 
         const value: ResolvedSession<TAccount> = {
