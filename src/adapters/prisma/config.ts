@@ -180,6 +180,24 @@ const resolveTableModel = ({
     return table;
 };
 
+const resolveOptionalTableModel = ({
+    client,
+    defaultTable,
+    input,
+    path,
+}: Omit<ResolveDataModelInput, "defaultSelect">): string | null => {
+    if (input !== undefined) {
+        return resolveTableModel({ client, defaultTable, input, path });
+    }
+
+    if (!isRecord(client) || !(defaultTable in client)) {
+        return null;
+    }
+
+    requireDelegate({ client, table: defaultTable });
+    return defaultTable;
+};
+
 export const resolvePrismaModels = ({
     client,
     input,
@@ -210,7 +228,7 @@ export const resolvePrismaModels = ({
             input: models.sessions,
             path: "models.sessions",
         }),
-        socials: resolveTableModel({
+        socials: resolveOptionalTableModel({
             client,
             defaultTable: PRISMA_DEFAULTS.socials.table,
             input: models.socials,

@@ -219,6 +219,14 @@ const assertTypes = () => {
     // @ts-expect-error Role is not part of the default account payload.
     void defaultAccount.role;
 
+    const { social_accounts: socialDelegate, ...sessionClient } = client;
+    const sessionsOnly = createPrismaAdapter({ client: sessionClient });
+    void socialDelegate;
+    void sessionsOnly;
+
+    // @ts-expect-error Social methods are absent when the Prisma model is absent.
+    void sessionsOnly.findSocial;
+
     // @ts-expect-error Unknown account fields are rejected.
     createPrismaAdapter({ client, models: { accounts: { select: ["missing"] } } });
 
@@ -321,6 +329,16 @@ describe("Prisma database adapter", () => {
         assert.ok(calls.sessionFindMany);
         assert.ok(calls.sessionUpdate);
         assert.ok(calls.sessionUpdateMany);
+    });
+
+    it("does not require or expose social persistence when the model is absent", () => {
+        const { client } = createClient();
+        const { social_accounts: socialDelegate, ...sessionClient } = client;
+        const db = createPrismaAdapter({ client: sessionClient });
+        void socialDelegate;
+
+        assert.equal("findSocial" in db, false);
+        assert.equal("createSocial" in db, false);
     });
 
     it("implements default account creation and social account linking", async () => {

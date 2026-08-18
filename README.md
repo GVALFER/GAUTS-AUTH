@@ -59,10 +59,10 @@ The default adapter uses this fixed relationship tree:
 users
 └── user_accounts
     ├── account_sessions
-    └── social_accounts
+    └── social_accounts (optional)
 ```
 
-Add the following models to the API schema. `password_hash` is nullable so the same account model supports password and social authentication.
+Add the three required models to the API schema. `password_hash` may be nullable when the same account model also supports social authentication.
 
 ```prisma
 model users {
@@ -80,7 +80,6 @@ model user_accounts {
 
   user     users             @relation(fields: [user_id], references: [id], onDelete: Cascade)
   sessions account_sessions[]
-  socials  social_accounts[]
 
   @@index([user_id])
 }
@@ -104,7 +103,17 @@ model account_sessions {
   @@index([expires_at])
   @@index([revoked_at])
 }
+```
 
+When social authentication is enabled, add this relation inside `user_accounts`:
+
+```prisma
+socials social_accounts[]
+```
+
+Then add the optional model:
+
+```prisma
 model social_accounts {
   id          String   @id @default(uuid()) @db.VarChar(255)
   account_id  String   @db.VarChar(255)
@@ -455,22 +464,22 @@ The cache is signed but not encrypted. Do not place passwords, password hashes, 
 
 ### Prisma adapter
 
-The Prisma adapter uses one fixed, predictable relationship tree:
+The Prisma adapter uses one fixed, predictable session relationship tree and one optional social relation:
 
 ```text
 users
 └── user_accounts
     ├── account_sessions
-    └── social_accounts
+    └── social_accounts (optional)
 ```
 
-The default delegate names are `prisma.users`, `prisma.user_accounts`, `prisma.account_sessions`, and `prisma.social_accounts`. The fixed Prisma relation fields are:
+The required default delegate names are `prisma.users`, `prisma.user_accounts`, and `prisma.account_sessions`. When `prisma.social_accounts` exists, the adapter adds social persistence automatically. The fixed Prisma relation fields are:
 
 - `user_accounts.user`;
 - `account_sessions.account`;
-- `social_accounts.account`.
+- `social_accounts.account` when social persistence is present.
 
-There is no relation mapping configuration. Applications may rename delegates with `table`, add payload fields with `select`, and define access conditions with `access`.
+There is no relation mapping configuration. Applications may rename delegates with `table`, add payload fields with `select`, and define access conditions with `access`. Omitting the social model removes the social methods from the adapter without affecting password or session authentication.
 
 #### Default models
 
@@ -535,6 +544,7 @@ const db = createPrismaAdapter({
         sessions: {
             table: "admin_sessions",
         },
+        // Only when social authentication is enabled.
         socials: {
             table: "admin_social_accounts",
         },
@@ -548,7 +558,7 @@ const db = createPrismaAdapter({
 
 | Property                 | Type / allowed values                   | Required | Default              | Description                                                |
 | ------------------------ | --------------------------------------- | :------: | -------------------- | ---------------------------------------------------------- |
-| `client`                 | Generated Prisma client                 |    ✅    | —                    | Prisma client containing the four auth models.             |
+| `client`                 | Generated Prisma client                 |    ✅    | —                    | Prisma client containing the three required auth models.    |
 | `models.users.table`     | Compatible user delegate name           |    ❌    | `"users"`            | Overrides the user delegate.                               |
 | `models.users.select`    | Unique scalar field array               |    ❌    | `[]`                 | Adds payload fields; `id` and `name` are always included.  |
 | `models.users.access`    | Scalar equality or allowed-value arrays |    ❌    | `{}`                 | Conditions required on the owning user/entity.             |
@@ -556,7 +566,7 @@ const db = createPrismaAdapter({
 | `models.accounts.select` | Unique scalar field array               |    ❌    | `[]`                 | Adds payload fields; `id` and `email` are always included. |
 | `models.accounts.access` | Scalar equality or allowed-value arrays |    ❌    | `{}`                 | Conditions required on the authenticating account.         |
 | `models.sessions.table`  | Compatible session delegate name        |    ❌    | `"account_sessions"` | Overrides authoritative session persistence.               |
-| `models.socials.table`   | Compatible social delegate name         |    ❌    | `"social_accounts"`  | Overrides provider association persistence.                |
+| `models.socials.table`   | Compatible social delegate name         |    ❌    | `"social_accounts"`  | Overrides optional provider association persistence.       |
 
 `select` accepts JSON-safe scalar fields and receives autocomplete from the generated Prisma client. `password`, `hash`, `password_hash`, and `passwordHash` are rejected by both TypeScript and runtime validation. Never select tokens or other secrets because the optional cache is signed, not encrypted.
 
@@ -708,6 +718,8 @@ await auth.createSession({
 ## Social authentication
 
 Social authentication is disabled unless `social` is configured. Import providers separately so applications only include the providers they use:
+
+Social authentication requires the optional `social_accounts` model documented in the schema setup. Without that model, `createPrismaAdapter()` remains a session-only adapter and configuring `social` fails during application startup.
 
 ```ts
 import { createHonoAuth } from "@gauts/auth/hono";

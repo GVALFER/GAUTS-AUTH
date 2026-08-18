@@ -511,4 +511,32 @@ describe("Hono social adapter", () => {
             (error: unknown) => isAuthError(error) && error.code === "AUTH_CONFIG_INVALID",
         );
     });
+
+    it("rejects social configuration without social database capabilities", () => {
+        const harness = createDb();
+        const sessions: DbAdapter = {
+            create: (input) => harness.db.create(input),
+            find: (input) => harness.db.find(input),
+            findActive: (input) => harness.db.findActive(input),
+            findToken: (token_hash) => harness.db.findToken(token_hash),
+            revoke: (input) => harness.db.revoke(input),
+            updateExpiry: (input) => harness.db.updateExpiry(input),
+        };
+
+        assert.throws(
+            () =>
+                createHonoAuth({
+                    cookie: { secure: false },
+                    db: sessions,
+                    secret,
+                    session: { validation: [] },
+                    social: {
+                        errorUrl: "https://app.example.com/auth/login",
+                        providers: [provider],
+                        successUrl: "https://app.example.com/dashboard",
+                    },
+                } as never),
+            (error: unknown) => isAuthError(error) && error.code === "AUTH_CONFIG_INVALID",
+        );
+    });
 });

@@ -148,9 +148,7 @@ type HasDefaults<Client> =
     HasModel<Client, "users", "user"> extends true
         ? HasModel<Client, "user_accounts", "account"> extends true
             ? HasModel<Client, "account_sessions", "session"> extends true
-                ? HasModel<Client, "social_accounts", "social"> extends true
-                    ? true
-                    : false
+                ? true
                 : false
             : false
         : false;
@@ -221,15 +219,24 @@ export type ResolvedPrismaDataModel = {
 export type ResolvedPrismaModels = {
     accounts: ResolvedPrismaDataModel;
     sessions: string;
-    socials: string;
+    socials: string | null;
     users: ResolvedPrismaDataModel;
 };
+
+type HasSocial<
+    Client,
+    Models extends PrismaModelsConfig<Client> | undefined,
+> = ConfigTable<ModelConfig<Models, "socials">, "social_accounts"> extends PrismaSocialModel<Client>
+    ? true
+    : false;
 
 export type PrismaDb<
     Client extends object,
     Models extends PrismaModelsConfig<Client> | undefined,
 > = DbAdapter<PrismaAccount<Client, Models> & AuthAccount> &
-    SocialDbAdapter<PrismaAccount<Client, Models> & AuthAccount>;
+    (HasSocial<Client, Models> extends true
+        ? SocialDbAdapter<PrismaAccount<Client, Models> & AuthAccount>
+        : object);
 
 export type CreatePrismaAdapter = {
     <Client extends object>(input: PrismaAdapterInput<Client>): PrismaDb<Client, undefined>;

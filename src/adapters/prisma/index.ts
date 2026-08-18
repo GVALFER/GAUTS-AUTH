@@ -1,6 +1,7 @@
 import { createError } from "../../errors.js";
 import { isRecord } from "../../session/guards.js";
-import type { AuthSessionRecord } from "../../session/types.js";
+import type { AuthAccount, AuthSessionRecord, DbAdapter } from "../../session/types.js";
+import type { SocialDbAdapter } from "../../social/types.js";
 import { isPrismaDelegate, resolvePrismaModels } from "./config.js";
 import {
     createAccountSelect,
@@ -41,12 +42,13 @@ export const createPrismaAdapter: CreatePrismaAdapter = <
     input: PrismaAdapterInput<Client, Models>,
 ): PrismaDb<Client, Models> => {
     const raw = input as { client: Client; models?: unknown };
+    type AccountData = PrismaAccount<Client, Models> & AuthAccount;
     const resolved = resolvePrismaModels({ client: raw.client, input: raw.models });
     const client: Record<string, unknown> = isRecord(raw.client) ? raw.client : {};
 
     const accounts = client[resolved.accounts.table];
     const sessions = client[resolved.sessions];
-    const socials = client[resolved.socials];
+    const socials = resolved.socials === null ? null : client[resolved.socials];
     const users = client[resolved.users.table];
 
     const accountSelect = createAccountSelect({
@@ -62,7 +64,7 @@ export const createPrismaAdapter: CreatePrismaAdapter = <
     if (
         !isPrismaDelegate(accounts) ||
         !isPrismaDelegate(sessions) ||
-        !isPrismaDelegate(socials) ||
+        (socials !== null && !isPrismaDelegate(socials)) ||
         !isPrismaDelegate(users)
     ) {
         throw createError({
@@ -115,29 +117,9 @@ export const createPrismaAdapter: CreatePrismaAdapter = <
         };
     };
 
-    return {
+    const db: DbAdapter<AccountData> = {
         create: async (session) => {
             await sessions.create({ data: session });
-        },
-
-        createAccount: async ({ email, name }) => {
-            const value = await accounts.create({
-                data: {
-                    email,
-                    user: { create: { name } },
-                },
-                select: { id: true },
-            });
-
-            if (!isRecord(value) || typeof value.id !== "string") {
-                throw new Error("Prisma account model returned invalid data.");
-            }
-
-            return value.id;
-        },
-
-        createSocial: async (social) => {
-            await socials.create({ data: social });
         },
 
         find: async ({ account_id, session_id }) => {
@@ -152,8 +134,6 @@ export const createPrismaAdapter: CreatePrismaAdapter = <
             return row === null ? null : requireRow(row);
         },
 
-        findAccount: async (account_id) => findAccount({ id: account_id }),
-
         findActive: async ({ account_id, now }) => {
             const rows = await sessions.findMany({
                 orderBy: { created_at: "desc" },
@@ -166,19 +146,6 @@ export const createPrismaAdapter: CreatePrismaAdapter = <
             });
 
             return requireRows(rows);
-        },
-
-        findEmail: async (email) => findAccount({ email }),
-
-        findSocial: async ({ provider, provider_id }) => {
-            const value = await socials.findFirst({
-                select: {
-                    account: { select: accountSelect },
-                },
-                where: { provider, provider_id },
-            });
-
-            return value === null ? null : readSocialAccount(value);
         },
 
         findToken: async (token_hash) => {
@@ -229,4 +196,47 @@ export const createPrismaAdapter: CreatePrismaAdapter = <
             });
         },
     };
+
+    if (socials === null) {
+        return db as PrismaDb<Client, Models>;
+    }
+
+    const social: SocialDbAdapter<AccountData> = {
+        createAccount: async ({ email, name }) => {
+            const value = await accounts.create({
+                data: {
+                    email,
+                    user: { create: { name } },
+                },
+                select: { id: true },
+            });
+
+            if (!isRecord(value) || typeof value.id !== "string") {
+                throw new Error("Prisma account model returned invalid data.");
+            }
+
+            return value.id;
+        },
+
+        createSocial: async (social) => {
+            await socials.create({ data: social });
+        },
+
+        findAccount: async (account_id) => findAccount({ id: account_id }),
+
+        findEmail: async (email) => findAccount({ email }),
+
+        findSocial: async ({ provider, provider_id }) => {
+            const value = await socials.findFirst({
+                select: {
+                    account: { select: accountSelect },
+                },
+                where: { provider, provider_id },
+            });
+
+            return value === null ? null : readSocialAccount(value);
+        },
+    };
+
+    return { ...db, ...social };
 };
