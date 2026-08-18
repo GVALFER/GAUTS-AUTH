@@ -246,11 +246,12 @@ import { nextAuth } from "./lib/auth.js";
 
 export const proxy = async (request: NextRequest) => {
     const response = NextResponse.next();
-    const renewal = await nextAuth.renew({ request, response });
-
-    if (renewal.status === 401) {
-        return NextResponse.redirect(new URL("/auth/login", request.url));
-    }
+    const renewal = await nextAuth.renew({
+        onUnauthorized: () =>
+            NextResponse.redirect(new URL("/auth/login", request.url)),
+        request,
+        response,
+    });
 
     if (renewal.status !== null && renewal.status >= 500) {
         return NextResponse.redirect(new URL("/maintenance", request.url));
@@ -260,7 +261,7 @@ export const proxy = async (request: NextRequest) => {
 };
 ```
 
-The frontend does not receive `AUTH_SECRET`. The API remains responsible for session validation and every `Set-Cookie` response.
+The application owns the redirect URL. When `onUnauthorized` returns another response, the adapter copies every API `Set-Cookie` header to that final response before returning it. The frontend does not receive `AUTH_SECRET`; the API remains responsible for session validation.
 
 ## Requirements and package entry points
 
@@ -920,11 +921,12 @@ import { NextResponse } from "next/server";
 
 export const proxy = async (request: NextRequest) => {
     const response = NextResponse.next();
-    const renewal = await nextAuth.renew({ request, response });
-
-    if (renewal.status === 401) {
-        return NextResponse.redirect(new URL("/auth/login", request.url));
-    }
+    const renewal = await nextAuth.renew({
+        onUnauthorized: () =>
+            NextResponse.redirect(new URL("/auth/login", request.url)),
+        request,
+        response,
+    });
 
     if (renewal.status !== null && renewal.status >= 500) {
         return NextResponse.redirect(new URL("/maintenance", request.url));
@@ -942,7 +944,9 @@ Result values:
 |   `false`   |       `401` | Session token is missing or malformed; no API request occurred. |
 |   `true`    | HTTP status | The renewal endpoint was called and returned this status.       |
 
-The adapter copies every returned `Set-Cookie` header to the browser response. It forwards only the session cookie and controlled client/origin headers required by the private API. Other cookies, authorization headers, and arbitrary headers are not forwarded.
+`onUnauthorized` is optional. When provided, it creates the application's final response for a `401`; the adapter transfers every returned `Set-Cookie` header to it. Without the callback, the original response is returned with `status: 401` as before.
+
+The adapter forwards only the session cookie and controlled client/origin headers required by the private API. Other cookies, authorization headers, and arbitrary headers are not forwarded.
 
 `buildForwardHeaders()` and `FORWARD_HEADERS` are exported from `@gauts/auth/next` for application fetchers that need the same controlled forwarding rules:
 
