@@ -8,6 +8,7 @@ import {
     type PrismaSocialModel,
     type PrismaUserModel,
 } from "../src/adapters/prisma/index.js";
+import { createHonoAuth } from "../src/adapters/hono/index.js";
 import { isAuthError } from "../src/errors.js";
 import type { SessionRecord } from "../src/session/types.js";
 
@@ -204,6 +205,31 @@ const assertTypes = () => {
     void role;
     void userName;
     void userRole;
+
+    const inline = createHonoAuth({
+        cookie: { secure: false },
+        db: createPrismaAdapter({
+            client,
+            models: {
+                accounts: {
+                    select: ["role"],
+                },
+                users: {
+                    select: ["role"],
+                },
+            },
+        }),
+        session: { validation: [] },
+    });
+    type InlineAccount = NonNullable<
+        Awaited<ReturnType<typeof inline.session.resolve>>
+    >["account"];
+    const inlineAccount = null as unknown as InlineAccount;
+    const inlineRole: "ADMIN" | "OWNER" = inlineAccount.role;
+    const inlineUserRole: "ADMIN" | "USER" = inlineAccount.user.role;
+    void inlineRole;
+    void inlineUserRole;
+    void inline;
 
     const defaults = createPrismaAdapter({ client });
     void defaults;

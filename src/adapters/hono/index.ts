@@ -87,6 +87,11 @@ export type HonoAuthConfig<TAccount extends AuthAccount = AuthAccount, TData = u
     HonoCacheOptions &
     HonoSocialOptions<TAccount, TData>;
 
+type HonoAuthOptions<TAccount extends AuthAccount> = Omit<HonoAuthBase<TAccount>, "db"> &
+    HonoCacheOptions;
+
+type DbAccount<TDb> = TDb extends DbAdapter<infer TAccount> ? TAccount : never;
+
 type CreateSessionInput = {
     account_id: string;
     context: Context;
@@ -419,12 +424,19 @@ export const createHonoAdapter = <TAccount extends AuthAccount>({
 };
 
 type CreateHonoAuth = {
-    <TAccount extends AuthAccount, TData>(
-        input: HonoAuthConfig<TAccount, TData> & { social: SocialConfig<TData> },
-    ): HonoSocialAuth<TAccount, TData>;
-    <TAccount extends AuthAccount>(
-        input: HonoAuthConfig<TAccount> & { social?: undefined },
-    ): HonoAuth<TAccount>;
+    <TDb extends DbAdapter, TData>(
+        input: HonoAuthOptions<DbAccount<TDb>> & {
+            db: TDb & SocialDbAdapter<DbAccount<TDb>>;
+            secret: string;
+            social: SocialConfig<TData>;
+        },
+    ): HonoSocialAuth<DbAccount<TDb>, TData>;
+    <TDb extends DbAdapter>(
+        input: HonoAuthOptions<DbAccount<TDb>> & {
+            db: TDb;
+            social?: undefined;
+        },
+    ): HonoAuth<DbAccount<TDb>>;
 };
 
 const createHonoAuthImpl = <TAccount extends AuthAccount, TData = undefined>({
