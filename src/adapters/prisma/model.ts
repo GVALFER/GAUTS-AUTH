@@ -1,15 +1,48 @@
 import { isAuthValue, isNullableString, isRecord } from "../../session/guards.js";
 import type {
     AuthAccount,
+    AuthData,
     AuthSessionRecord,
     AuthValue,
     SessionRecord,
 } from "../../session/types.js";
-import type { PrismaAccessValue, ResolvedPrismaModel } from "./types.js";
+import type { PrismaAccessValue, ResolvedPrismaDataModel } from "./types.js";
 
-type ReadModelResult = {
+type ReadAccountResult = {
+    account: AuthAccount;
     allowed: boolean;
-    data: AuthAccount;
+};
+
+type ReadDataInput = {
+    model: ResolvedPrismaDataModel;
+    value: unknown;
+};
+
+type ReadAccountInput = {
+    accounts: ResolvedPrismaDataModel;
+    users: ResolvedPrismaDataModel;
+    value: unknown;
+};
+
+type RequireAuthRowInput = {
+    accounts: ResolvedPrismaDataModel;
+    users: ResolvedPrismaDataModel;
+    value: unknown;
+};
+
+type CreateAuthSelectInput = {
+    accounts: ResolvedPrismaDataModel;
+    users: ResolvedPrismaDataModel;
+};
+
+type MatchesAccessInput = {
+    access: Record<string, PrismaAccessValue>;
+    value: Record<string, unknown>;
+};
+
+type CreateAccountSelectInput = {
+    accounts: ResolvedPrismaDataModel;
+    users: ResolvedPrismaDataModel;
 };
 
 export const sessionSelect = {
@@ -45,33 +78,27 @@ const isSessionRecord = (value: unknown): value is SessionRecord => {
     );
 };
 
-const createModelSelect = (model: ResolvedPrismaModel): Record<string, unknown> => {
-    const fields = new Set([...model.select, ...Object.keys(model.access)]);
-    const select: Record<string, unknown> = Object.fromEntries(
-        [...fields].map((field) => [field, true]),
+const createModelSelect = (model: ResolvedPrismaDataModel): Record<string, true> => {
+    return Object.fromEntries(
+        [...new Set([...model.select, ...Object.keys(model.access)])].map((field) => [field, true]),
     );
-
-    for (const relation of Object.values(model.relations)) {
-        select[relation.relation] = { select: createModelSelect(relation) };
-    }
-
-    return select;
 };
 
-export const createAuthSelect = (account: ResolvedPrismaModel) => ({
-    ...sessionSelect,
-    [account.relation]: {
-        select: createModelSelect(account),
+export const createAccountSelect = ({ accounts, users }: CreateAccountSelectInput) => ({
+    ...createModelSelect(accounts),
+    user: {
+        select: createModelSelect(users),
     },
 });
 
-const matchesAccess = ({
-    access,
-    value,
-}: {
-    access: Record<string, PrismaAccessValue>;
-    value: Record<string, unknown>;
-}): boolean => {
+export const createAuthSelect = ({ accounts, users }: CreateAuthSelectInput) => ({
+    ...sessionSelect,
+    account: {
+        select: createAccountSelect({ accounts, users }),
+    },
+});
+
+const matchesAccess = ({ access, value }: MatchesAccessInput): boolean => {
     return Object.entries(access).every(([field, expected]) => {
         const current = value[field];
         return Array.isArray(expected)
@@ -80,15 +107,9 @@ const matchesAccess = ({
     });
 };
 
-const readModel = ({
-    model,
-    value,
-}: {
-    model: ResolvedPrismaModel;
-    value: unknown;
-}): ReadModelResult => {
+const readData = ({ model, value }: ReadDataInput): AuthData => {
     if (!isRecord(value)) {
-        throw new Error(`Prisma relation ${model.relation} returned invalid data.`);
+        throw new Error(`Prisma model ${model.table} returned invalid data.`);
     }
 
     const data: Record<string, AuthValue> = {};
@@ -97,25 +118,42 @@ const readModel = ({
         const fieldValue = value[field];
 
         if (!isAuthValue(fieldValue) || isRecord(fieldValue) || Array.isArray(fieldValue)) {
-            throw new Error(`Prisma field ${model.name}.${field} returned invalid payload data.`);
+            throw new Error(`Prisma field ${model.table}.${field} returned invalid payload data.`);
         }
 
         data[field] = fieldValue;
     }
 
-    if (typeof data.id !== "string") {
-        throw new Error(`Prisma model ${model.name} must return a string id.`);
+    return data;
+};
+
+export const readAccount = ({ accounts, users, value }: ReadAccountInput): ReadAccountResult => {
+    if (!isRecord(value)) {
+        throw new Error("Prisma account relation returned invalid data.");
     }
 
-    let allowed = matchesAccess({ access: model.access, value });
+    const userValue = value.user;
+    const account: Record<string, AuthValue> & { user: AuthData } = {
+        ...readData({ model: accounts, value }),
+        user: readData({ model: users, value: userValue }),
+    };
 
-    for (const relation of Object.values(model.relations)) {
-        const nested = readModel({ model: relation, value: value[relation.relation] });
-        data[relation.relation] = nested.data;
-        allowed &&= nested.allowed;
+    if (
+        typeof account.id !== "string" ||
+        typeof account.email !== "string" ||
+        typeof account.user.id !== "string" ||
+        typeof account.user.name !== "string"
+    ) {
+        throw new Error("Prisma account relation returned invalid data.");
     }
 
-    return { allowed, data: data as AuthAccount };
+    return {
+        account: account as AuthAccount,
+        allowed:
+            matchesAccess({ access: accounts.access, value }) &&
+            isRecord(userValue) &&
+            matchesAccess({ access: users.access, value: userValue }),
+    };
 };
 
 export const requireRow = (value: unknown): SessionRecord => {
@@ -146,23 +184,21 @@ export const requireRows = (value: unknown): SessionRecord[] => {
 };
 
 export const requireAuthRow = ({
-    account,
+    accounts,
+    users,
     value,
-}: {
-    account: ResolvedPrismaModel;
-    value: unknown;
-}): AuthSessionRecord => {
+}: RequireAuthRowInput): AuthSessionRecord => {
     const row = requireRow(value);
 
     if (!isRecord(value)) {
         throw new Error("Prisma account relation returned invalid data.");
     }
 
-    const resolved = readModel({ model: account, value: value[account.relation] });
+    const resolved = readAccount({ accounts, users, value: value.account });
 
     return {
         ...row,
-        account: resolved.data,
+        account: resolved.account,
         allowed: resolved.allowed,
     };
 };

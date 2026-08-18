@@ -13,9 +13,6 @@ type ExampleDeps = {
     secret: string;
 };
 
-const DUMMY_PASSWORD_HASH =
-    "$argon2id$v=19$m=65536,p=4,t=3$PUotpfVXonc0VRFuV1pKZQ$oxxA8DMvGRTSbZvh2Dkokeyih9sbKeodWYROqVxP9BI";
-
 export const createApp = ({ db, findAccount, secret }: ExampleDeps) => {
     const auth = createHonoAuth({
         cache: { ttl: 60 },
@@ -45,7 +42,7 @@ export const createApp = ({ db, findAccount, secret }: ExampleDeps) => {
 
         const passwordValid = await auth.password.verify({
             password: body.password,
-            storedHash: account?.passwordHash ?? DUMMY_PASSWORD_HASH,
+            storedHash: account?.passwordHash,
         });
 
         if (!account || !passwordValid) {
@@ -73,6 +70,7 @@ export const createApp = ({ db, findAccount, secret }: ExampleDeps) => {
     app.get("/account", auth.requireSession, (c) => {
         return c.json({
             account: c.get("account"),
+            user: c.get("user"),
         });
     });
 

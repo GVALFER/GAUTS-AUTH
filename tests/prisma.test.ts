@@ -4,8 +4,9 @@ import { describe, it } from "node:test";
 import {
     createPrismaAdapter,
     type PrismaAccountModel,
-    type PrismaAdapterInput,
     type PrismaSessionModel,
+    type PrismaSocialModel,
+    type PrismaUserModel,
 } from "../src/adapters/prisma/index.js";
 import { isAuthError } from "../src/errors.js";
 import type { SessionRecord } from "../src/session/types.js";
@@ -28,26 +29,30 @@ type Delegate<Row> = {
     updateMany(args: unknown): Promise<unknown>;
 };
 
+type UserRow = {
+    id: string;
+    name: string;
+    role: "ADMIN" | "USER";
+    status: "ACTIVE" | "INACTIVE";
+};
+
 type AccountRow = {
     email: string;
     id: string;
     name: string;
     password_hash: string;
     role: "ADMIN" | "OWNER";
-    status: "ACTIVE" | "INACTIVE" | "PENDING";
+    status: "ACTIVE" | "INACTIVE";
     timezone: string | null;
+    user_id: string;
 };
 
-type UserRow = {
+type SocialRow = {
+    account_id: string;
+    created_at: Date;
     id: string;
-    role: "ADMIN" | "USER";
-    status: "ACTIVE" | "INACTIVE" | "PENDING";
-};
-
-type LegacyAccountRow = {
-    email: string;
-    hash: string;
-    id: string;
+    provider: string;
+    provider_id: string;
 };
 
 const row: SessionRecord = {
@@ -63,309 +68,197 @@ const row: SessionRecord = {
     updated_at: null,
 };
 
+const user: UserRow = {
+    id: "user-1",
+    name: "Company",
+    role: "ADMIN",
+    status: "ACTIVE",
+};
+
 const account: AccountRow = {
     email: "owner@example.com",
     id: "account-1",
     name: "Owner",
     password_hash: "secret",
     role: "OWNER",
-    status: "PENDING",
+    status: "ACTIVE",
     timezone: "Europe/Lisbon",
+    user_id: user.id,
 };
 
-const user: UserRow = {
-    id: "user-1",
-    role: "ADMIN",
-    status: "PENDING",
-};
+type DelegateHandlers = Partial<{
+    create(args: unknown): Promise<unknown>;
+    findFirst(args: unknown): Promise<unknown>;
+    findMany(args: unknown): Promise<unknown>;
+    findUnique(args: unknown): Promise<unknown>;
+    update(args: unknown): Promise<unknown>;
+    updateMany(args: unknown): Promise<unknown>;
+}>;
 
-type CreateDelegateInput = {
-    accountRelation?: string;
-    userRelation?: string;
-};
-
-const createDelegate = ({
-    accountRelation = "account",
-    userRelation = "user",
-}: CreateDelegateInput = {}) => {
-    const calls: Record<string, unknown> = {};
-    const delegate: Delegate<SessionRecord> = {
-        [meta]: null as never,
-        create: async (args) => {
-            calls.create = args;
-            return row;
-        },
-        findFirst: async (args) => {
-            calls.findFirst = args;
-            return row;
-        },
-        findMany: async (args) => {
-            calls.findMany = args;
-            return [row];
-        },
-        findUnique: async (args) => {
-            calls.findUnique = args;
-            return {
-                ...row,
-                [accountRelation]: {
-                    ...account,
-                    [userRelation]: user,
-                },
-            };
-        },
-        update: async (args) => {
-            calls.update = args;
-            return row;
-        },
-        updateMany: async (args) => {
-            calls.updateMany = args;
-            return { count: 1 };
-        },
-    };
-
-    return { calls, delegate };
-};
-
-const createModelDelegate = <Row>(): Delegate<Row> => ({
+const createDelegate = <Row>(handlers: DelegateHandlers = {}): Delegate<Row> => ({
     [meta]: null as never,
-    create: async () => null,
-    findFirst: async () => null,
-    findMany: async () => [],
-    findUnique: async () => null,
-    update: async () => null,
-    updateMany: async () => ({ count: 0 }),
+    create: handlers.create ?? (async () => null),
+    findFirst: handlers.findFirst ?? (async () => null),
+    findMany: handlers.findMany ?? (async () => []),
+    findUnique: handlers.findUnique ?? (async () => null),
+    update: handlers.update ?? (async () => null),
+    updateMany: handlers.updateMany ?? (async () => ({ count: 0 })),
 });
 
-const createClient = () => {
-    const sessions = createDelegate();
-
-    return {
-        calls: sessions.calls,
-        client: {
-            account: createModelDelegate<AccountRow>(),
-            legacy_accounts: createModelDelegate<LegacyAccountRow>(),
-            sessions: sessions.delegate,
-            user: createModelDelegate<UserRow>(),
-            user_accounts: createModelDelegate<AccountRow>(),
-            users: createModelDelegate<UserRow>(),
-        },
+const createClient = ({ allowed = true }: { allowed?: boolean } = {}) => {
+    const calls: Record<string, unknown> = {};
+    const resolvedAccount = {
+        ...account,
+        status: allowed ? account.status : "INACTIVE",
+        user,
     };
+    const client = {
+        account_sessions: createDelegate<SessionRecord>({
+            create: async (args) => {
+                calls.sessionCreate = args;
+                return row;
+            },
+            findFirst: async (args) => {
+                calls.sessionFindFirst = args;
+                return row;
+            },
+            findMany: async (args) => {
+                calls.sessionFindMany = args;
+                return [row];
+            },
+            findUnique: async (args) => {
+                calls.sessionFindUnique = args;
+                return { ...row, account: resolvedAccount };
+            },
+            update: async (args) => {
+                calls.sessionUpdate = args;
+                return row;
+            },
+            updateMany: async (args) => {
+                calls.sessionUpdateMany = args;
+                return { count: 1 };
+            },
+        }),
+        social_accounts: createDelegate<SocialRow>({
+            create: async (args) => {
+                calls.socialCreate = args;
+                return null;
+            },
+            findFirst: async (args) => {
+                calls.socialFindFirst = args;
+                return { account: resolvedAccount };
+            },
+        }),
+        user_accounts: createDelegate<AccountRow>({
+            create: async (args) => {
+                calls.accountCreate = args;
+                return { id: account.id };
+            },
+            findUnique: async (args) => {
+                calls.accountFindUnique = args;
+                return resolvedAccount;
+            },
+        }),
+        users: createDelegate<UserRow>(),
+    };
+
+    return { calls, client };
 };
 
 const assertTypes = () => {
     const { client } = createClient();
-    const sessionModel: PrismaSessionModel<typeof client> = "sessions";
     const accountModel: PrismaAccountModel<typeof client> = "user_accounts";
-    const legacyAccountModel: PrismaAccountModel<typeof client> = "legacy_accounts";
-    void sessionModel;
+    const sessionModel: PrismaSessionModel<typeof client> = "account_sessions";
+    const socialModel: PrismaSocialModel<typeof client> = "social_accounts";
+    const userModel: PrismaUserModel<typeof client> = "users";
     void accountModel;
-    void legacyAccountModel;
+    void sessionModel;
+    void socialModel;
+    void userModel;
 
-    // @ts-expect-error user_accounts does not implement the session schema.
+    // @ts-expect-error Accounts are not session models.
     const invalidSession: PrismaSessionModel<typeof client> = "user_accounts";
     void invalidSession;
 
-    // @ts-expect-error sessions is a session model, not an account model.
-    const invalidAccount: PrismaAccountModel<typeof client> = "sessions";
-    void invalidAccount;
-
-    // @ts-expect-error relation models without login credentials are not account models.
-    const invalidRelationAccount: PrismaAccountModel<typeof client> = "users";
-    void invalidRelationAccount;
-
-    const defaults = { client } satisfies PrismaAdapterInput<typeof client>;
-    void defaults;
-
-    const legacy = {
+    const db = createPrismaAdapter({
         client,
         models: {
-            account: {
-                name: "legacy_accounts",
+            accounts: {
+                access: { status: ["ACTIVE"] },
+                select: ["name", "role", "status", "timezone"],
+            },
+            users: {
+                access: { status: ["ACTIVE"] },
+                select: ["role", "status"],
             },
         },
-    } satisfies PrismaAdapterInput<
-        typeof client,
-        {
-            account: {
-                name: "legacy_accounts";
-            };
-        }
-    >;
-    void legacy;
+    });
+    void db;
+    type Account = NonNullable<Awaited<ReturnType<typeof db.findToken>>>["account"];
+    const typed = null as unknown as Account;
+    const email: string = typed.email;
+    const role: "ADMIN" | "OWNER" = typed.role;
+    const userName: string = typed.user.name;
+    const userRole: "ADMIN" | "USER" = typed.user.role;
+    void email;
+    void role;
+    void userName;
+    void userRole;
 
-    const defaultDb = createPrismaAdapter({ client });
-    void defaultDb;
+    const defaults = createPrismaAdapter({ client });
+    void defaults;
     type DefaultAccount = NonNullable<
-        Awaited<ReturnType<typeof defaultDb.findToken>>
+        Awaited<ReturnType<typeof defaults.findToken>>
     >["account"];
     const defaultAccount = null as unknown as DefaultAccount;
     const defaultEmail: string = defaultAccount.email;
+    const defaultName: string = defaultAccount.user.name;
     void defaultEmail;
+    void defaultName;
 
-    const custom = {
-        client,
-        models: {
-            account: {
-                access: { status: ["ACTIVE", "PENDING"] },
-                name: "user_accounts",
-                relations: {
-                    user: {
-                        access: { status: "ACTIVE" },
-                        name: "users",
-                        select: ["id", "role"],
-                    },
-                },
-                select: ["id", "email", "role"],
-            },
-        },
-    } satisfies PrismaAdapterInput<
-        typeof client,
-        {
-            account: {
-                access: { status: readonly ["ACTIVE", "PENDING"] };
-                name: "user_accounts";
-                relations: {
-                    user: {
-                        access: { status: "ACTIVE" };
-                        name: "users";
-                        select: readonly ["id", "role"];
-                    };
-                };
-                select: readonly ["id", "email", "role"];
-            };
-        }
-    >;
-    void custom;
+    // @ts-expect-error Role is not part of the default account payload.
+    void defaultAccount.role;
 
-    const typedDb = createPrismaAdapter({
-        client,
-        models: {
-            account: {
-                name: "user_accounts",
-                relations: {
-                    user: {
-                        name: "users",
-                        select: ["id", "role"],
-                    },
-                },
-                select: ["id", "email"],
-            },
-        },
-    });
-    void typedDb;
-    type TypedAccount = NonNullable<
-        Awaited<ReturnType<typeof typedDb.findToken>>
-    >["account"];
-    const typedAccount = null as unknown as TypedAccount;
-    const email: string = typedAccount.email;
-    const role: string = typedAccount.user.role;
-    void email;
-    void role;
+    // @ts-expect-error Unknown account fields are rejected.
+    createPrismaAdapter({ client, models: { accounts: { select: ["missing"] } } });
 
-    // @ts-expect-error name was not selected for the account payload.
-    void typedAccount.name;
-
-    // @ts-expect-error status was not selected for the nested user payload.
-    void typedAccount.user.status;
-
-    // @ts-expect-error unknown account fields are rejected.
-    createPrismaAdapter({
-        client,
-        models: { account: { select: ["missing"] } },
-    });
+    // @ts-expect-error Password hashes can never enter the auth payload.
+    createPrismaAdapter({ client, models: { accounts: { select: ["password_hash"] } } });
 };
 
 void assertTypes;
 
 describe("Prisma database adapter", () => {
-    it("uses the default models and exposes account id and email", async () => {
-        const { calls, client } = createClient();
-        const db = createPrismaAdapter({ client });
-
-        await db.create({
-            account_id: row.account_id,
-            agent: row.agent,
-            country: "PT",
-            created_at: row.created_at,
-            expires_at: row.expires_at,
-            id: row.id,
-            ip: row.ip,
-            platform: row.platform,
-            token_hash: row.token_hash,
-        });
-
-        assert.deepEqual(calls.create, {
-            data: {
-                account_id: row.account_id,
-                agent: row.agent,
-                country: "PT",
-                created_at: row.created_at,
-                expires_at: row.expires_at,
-                id: row.id,
-                ip: row.ip,
-                platform: row.platform,
-                token_hash: row.token_hash,
-            },
-        });
-
-        assert.deepEqual(await db.findToken(row.token_hash), {
-            ...row,
-            account: { email: account.email, id: account.id },
-            allowed: true,
-        });
-        assert.deepEqual(calls.findUnique, {
-            select: {
-                ...Object.fromEntries(Object.keys(row).map((field) => [field, true])),
-                account: {
-                    select: { email: true, id: true },
-                },
-            },
-            where: { token_hash: row.token_hash },
-        });
-    });
-
-    it("omits country when the application does not provide login metadata", async () => {
-        const { calls, client } = createClient();
-        const db = createPrismaAdapter({ client });
-
-        await db.create({
-            account_id: row.account_id,
-            agent: row.agent,
-            created_at: row.created_at,
-            expires_at: row.expires_at,
-            id: row.id,
-            ip: row.ip,
-            platform: row.platform,
-            token_hash: row.token_hash,
-        });
-
-        assert.equal(Object.hasOwn((calls.create as { data: object }).data, "country"), false);
-    });
-
-    it("selects custom account data and applies hidden access fields", async () => {
+    it("resolves a session with the fixed account and user relations", async () => {
         const { calls, client } = createClient();
         const db = createPrismaAdapter({
             client,
             models: {
-                account: {
-                    access: {
-                        role: ["OWNER", "ADMIN"],
-                        status: ["ACTIVE", "PENDING"],
-                    },
-                    name: "user_accounts",
-                    select: ["id", "email", "name"],
+                accounts: {
+                    access: { status: ["ACTIVE"] },
+                    select: ["name", "role", "status", "timezone"],
+                },
+                users: {
+                    access: { status: ["ACTIVE"] },
+                    select: ["role", "status"],
                 },
             },
         });
 
-        assert.deepEqual((await db.findToken(row.token_hash))?.account, {
+        const resolved = await db.findToken(row.token_hash);
+
+        assert.equal(resolved?.allowed, true);
+        assert.deepEqual(resolved?.account, {
             email: account.email,
             id: account.id,
             name: account.name,
+            role: account.role,
+            status: account.status,
+            timezone: account.timezone,
+            user,
         });
-        assert.deepEqual(calls.findUnique, {
+        assert.deepEqual(calls.sessionFindUnique, {
             select: {
-                ...Object.fromEntries(Object.keys(row).map((field) => [field, true])),
                 account: {
                     select: {
                         email: true,
@@ -373,101 +266,150 @@ describe("Prisma database adapter", () => {
                         name: true,
                         role: true,
                         status: true,
+                        timezone: true,
+                        user: {
+                            select: {
+                                id: true,
+                                name: true,
+                                role: true,
+                                status: true,
+                            },
+                        },
                     },
                 },
+                account_id: true,
+                agent: true,
+                created_at: true,
+                expires_at: true,
+                id: true,
+                ip: true,
+                platform: true,
+                revoked_at: true,
+                token_hash: true,
+                updated_at: true,
             },
             where: { token_hash: row.token_hash },
         });
     });
 
-    it("loads configured nested relations into the account payload", async () => {
-        const { client } = createClient();
+    it("returns allowed=false when an access condition fails", async () => {
+        const { client } = createClient({ allowed: false });
         const db = createPrismaAdapter({
             client,
             models: {
-                account: {
-                    name: "user_accounts",
-                    relations: {
-                        user: {
-                            access: { status: ["ACTIVE", "PENDING"] },
-                            name: "users",
-                            select: ["id", "role"],
-                        },
-                    },
-                    select: ["id", "email"],
-                },
+                accounts: { access: { status: ["ACTIVE"] } },
             },
         });
 
-        assert.deepEqual(await db.findToken(row.token_hash), {
-            ...row,
-            account: {
-                email: account.email,
-                id: account.id,
-                user: {
-                    id: user.id,
-                    role: user.role,
-                },
+        const resolved = await db.findToken(row.token_hash);
+        assert.equal(resolved?.allowed, false);
+    });
+
+    it("implements session persistence", async () => {
+        const { calls, client } = createClient();
+        const db = createPrismaAdapter({ client });
+        const now = new Date("2026-08-17T12:00:00.000Z");
+
+        await db.create({ ...row, revoked_at: undefined, updated_at: undefined } as never);
+        await db.find({ account_id: account.id, session_id: row.id });
+        await db.findActive({ account_id: account.id, now });
+        await db.updateExpiry({ expires_at: row.expires_at, session_id: row.id, updated_at: now });
+        await db.revoke({ revoked_at: now, session_ids: [row.id] });
+
+        assert.ok(calls.sessionCreate);
+        assert.ok(calls.sessionFindFirst);
+        assert.ok(calls.sessionFindMany);
+        assert.ok(calls.sessionUpdate);
+        assert.ok(calls.sessionUpdateMany);
+    });
+
+    it("implements default account creation and social account linking", async () => {
+        const { calls, client } = createClient();
+        const db = createPrismaAdapter({ client });
+        const createdAt = new Date("2026-08-18T10:00:00.000Z");
+
+        const accountId = await db.createAccount({
+            email: "new@example.com",
+            name: "New Company",
+        });
+        await db.createSocial({
+            account_id: accountId,
+            created_at: createdAt,
+            id: "social-1",
+            provider: "google",
+            provider_id: "google-1",
+        });
+        const linked = await db.findSocial({
+            provider: "google",
+            provider_id: "google-1",
+        });
+
+        assert.equal(accountId, account.id);
+        assert.equal(linked?.account.email, account.email);
+        assert.deepEqual(calls.accountCreate, {
+            data: {
+                email: "new@example.com",
+                user: { create: { name: "New Company" } },
             },
-            allowed: true,
+            select: { id: true },
+        });
+        assert.deepEqual(calls.socialCreate, {
+            data: {
+                account_id: account.id,
+                created_at: createdAt,
+                id: "social-1",
+                provider: "google",
+                provider_id: "google-1",
+            },
         });
     });
 
-    it("returns allowed=false when an access condition does not match", async () => {
+    it("supports explicit table names without relation configuration", () => {
         const { client } = createClient();
-        const db = createPrismaAdapter({
-            client,
-            models: {
-                account: {
-                    access: { status: ["ACTIVE"] },
-                    name: "user_accounts",
-                },
-            },
-        });
-
-        assert.equal((await db.findToken(row.token_hash))?.allowed, false);
-    });
-
-    it("uses a custom session model", async () => {
-        const sessions = createDelegate();
         const custom = {
-            admin_sessions: sessions.delegate,
-            user_accounts: createModelDelegate<AccountRow>(),
+            custom_accounts: client.user_accounts,
+            custom_sessions: client.account_sessions,
+            custom_socials: client.social_accounts,
+            custom_users: client.users,
         };
-        const db = createPrismaAdapter({
-            client: custom,
-            models: {
-                account: { name: "user_accounts" },
-                sessions: { name: "admin_sessions" },
-            },
-        });
 
-        assert.deepEqual(await db.find({ account_id: row.account_id, session_id: row.id }), row);
+        assert.doesNotThrow(() =>
+            createPrismaAdapter({
+                client: custom,
+                models: {
+                    accounts: { table: "custom_accounts" },
+                    sessions: { table: "custom_sessions" },
+                    socials: { table: "custom_socials" },
+                    users: { table: "custom_users" },
+                },
+            }),
+        );
     });
 
-    it("rejects invalid runtime models and configuration", () => {
+    it("rejects an invalid model at startup", () => {
         const { client } = createClient();
 
         assert.throws(
             () =>
                 createPrismaAdapter({
-                    client: { ...client, sessions: {} as Delegate<SessionRecord> },
-                }),
-            (error) => isAuthError(error) && error.code === "AUTH_CONFIG_INVALID",
+                    client: { ...client, social_accounts: {} },
+                } as never),
+            (error: unknown) => isAuthError(error) && error.code === "AUTH_CONFIG_INVALID",
         );
+    });
+
+    it("rejects private fields at runtime", () => {
+        const { client } = createClient();
 
         assert.throws(
             () =>
                 createPrismaAdapter({
                     client,
                     models: {
-                        account: {
-                            access: { status: [] },
-                        },
+                        accounts: { select: ["password_hash"] },
                     },
-                }),
-            (error) => isAuthError(error) && error.code === "AUTH_CONFIG_INVALID",
+                } as never),
+            (error: unknown) => isAuthError(error) && error.code === "AUTH_CONFIG_INVALID",
         );
-
     });
 });

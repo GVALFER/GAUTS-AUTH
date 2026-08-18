@@ -26,6 +26,7 @@ const account = {
     timezone: "Europe/Lisbon",
     user: {
         id: "user-1",
+        name: "Company",
         role: "ADMIN",
         status: "ACTIVE",
     },

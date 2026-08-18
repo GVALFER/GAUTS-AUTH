@@ -8,9 +8,12 @@ import {
     type SessionCache,
     type SessionCacheConfig,
 } from "../../session/cache.js";
-import type { AuthAccount, ResolvedSession, Session } from "../../session/types.js";
+import type { AuthAccount, DbAdapter, ResolvedSession, Session } from "../../session/types.js";
+import type { SocialConfig, SocialDbAdapter } from "../../social/types.js";
+import { createHonoSocial, type HonoSocial } from "./social.js";
 
 export type { SessionCacheConfig } from "../../session/cache.js";
+export type { HonoSocial } from "./social.js";
 import {
     formatRenewAt,
     parseSessionToken,
@@ -21,6 +24,7 @@ import {
 export type HonoAuthVariables<TAccount extends AuthAccount = AuthAccount> = {
     account: TAccount;
     session: Session;
+    user: TAccount["user"];
 };
 
 export type HonoAuthEnv<TAccount extends AuthAccount = AuthAccount> = Env & {
@@ -59,13 +63,29 @@ export type HonoAdapterConfig<TAccount extends AuthAccount = AuthAccount> = {
     secret?: string;
 };
 
-type HonoAuthBase<TAccount extends AuthAccount> = AuthDeps<TAccount> & {
+type HonoAuthBase<TAccount extends AuthAccount> = Omit<AuthDeps<TAccount>, "db"> & {
     cookie?: HonoCookieConfig;
+    db: DbAdapter<TAccount>;
     getIp?: HonoGetIp;
 };
 
-export type HonoAuthConfig<TAccount extends AuthAccount = AuthAccount> = HonoAuthBase<TAccount> &
-    HonoCacheOptions;
+type HonoSocialOptions<TAccount extends AuthAccount, TData> =
+    | {
+          db: DbAdapter<TAccount> & SocialDbAdapter<TAccount>;
+          secret: string;
+          social: SocialConfig<TData>;
+      }
+    | {
+          db: DbAdapter<TAccount>;
+          social?: undefined;
+      };
+
+export type HonoAuthConfig<TAccount extends AuthAccount = AuthAccount, TData = undefined> = Omit<
+    HonoAuthBase<TAccount>,
+    "db"
+> &
+    HonoCacheOptions &
+    HonoSocialOptions<TAccount, TData>;
 
 type CreateSessionInput = {
     account_id: string;
@@ -98,6 +118,20 @@ export type HonoAdapter<TAccount extends AuthAccount = AuthAccount> = {
 
 export type HonoAuth<TAccount extends AuthAccount = AuthAccount> = Auth<TAccount> &
     HonoAdapter<TAccount>;
+
+export type HonoSocialAuth<
+    TAccount extends AuthAccount = AuthAccount,
+    TData = undefined,
+> = Auth<TAccount> &
+    HonoAdapter<TAccount> & {
+        social: HonoSocial<TData>;
+    };
+
+type ResolveDbSessionInput = {
+    client: SessionClientInput;
+    context: Context;
+    token: string;
+};
 
 const resolveCookie = (config: HonoCookieConfig = {}) => {
     const names = resolveSessionCookieNames(config);
@@ -251,11 +285,7 @@ export const createHonoAdapter = <TAccount extends AuthAccount>({
         client,
         context,
         token,
-    }: {
-        client: SessionClientInput;
-        context: Context;
-        token: string;
-    }): Promise<ResolvedSession<TAccount>> => {
+    }: ResolveDbSessionInput): Promise<ResolvedSession<TAccount>> => {
         let value;
 
         try {
@@ -364,6 +394,7 @@ export const createHonoAdapter = <TAccount extends AuthAccount>({
 
         c.set("session", value.session);
         c.set("account", value.account);
+        c.set("user", value.account.user);
         await next();
     };
 
@@ -387,7 +418,16 @@ export const createHonoAdapter = <TAccount extends AuthAccount>({
     };
 };
 
-export const createHonoAuth = <TAccount extends AuthAccount>({
+type CreateHonoAuth = {
+    <TAccount extends AuthAccount, TData>(
+        input: HonoAuthConfig<TAccount, TData> & { social: SocialConfig<TData> },
+    ): HonoSocialAuth<TAccount, TData>;
+    <TAccount extends AuthAccount>(
+        input: HonoAuthConfig<TAccount> & { social?: undefined },
+    ): HonoAuth<TAccount>;
+};
+
+const createHonoAuthImpl = <TAccount extends AuthAccount, TData = undefined>({
     cache,
     cookie,
     db,
@@ -395,21 +435,59 @@ export const createHonoAuth = <TAccount extends AuthAccount>({
     password,
     secret,
     session,
-}: HonoAuthConfig<TAccount>): HonoAuth<TAccount> => {
+    social,
+}: HonoAuthConfig<TAccount, TData>): HonoAuth<TAccount> | HonoSocialAuth<TAccount, TData> => {
     const auth = createAuth({
         db,
         ...(password === undefined ? {} : { password }),
         ...(session === undefined ? {} : { session }),
     });
 
+    const adapter = createHonoAdapter({
+        auth,
+        ...(cache === undefined ? {} : { cache }),
+        ...(cookie === undefined ? {} : { cookie }),
+        ...(getIp === undefined ? {} : { getIp }),
+        ...(secret === undefined ? {} : { secret }),
+    });
+
+    if (social === undefined) {
+        return {
+            ...auth,
+            ...adapter,
+        };
+    }
+
+    const socialDb = db as DbAdapter<TAccount> & Partial<SocialDbAdapter<TAccount>>;
+    const methods: (keyof SocialDbAdapter<TAccount>)[] = [
+        "createAccount",
+        "createSocial",
+        "findAccount",
+        "findEmail",
+        "findSocial",
+    ];
+
+    if (methods.some((method) => typeof socialDb[method] !== "function")) {
+        throw createError({
+            code: "AUTH_CONFIG_INVALID",
+            message: "DB adapter does not support social authentication.",
+        });
+    }
+
+    const resolvedCookie = resolveCookie(cookie);
+
     return {
         ...auth,
-        ...createHonoAdapter({
-            auth,
-            ...(cache === undefined ? {} : { cache }),
-            ...(cookie === undefined ? {} : { cookie }),
-            ...(getIp === undefined ? {} : { getIp }),
-            ...(secret === undefined ? {} : { secret }),
+        ...adapter,
+        social: createHonoSocial({
+            config: social,
+            cookie: resolvedCookie.options,
+            createSession: (input) => adapter.createSession(input),
+            db: socialDb as DbAdapter<TAccount> & SocialDbAdapter<TAccount>,
+            sessionCookieNames: Object.values(resolvedCookie.names),
+            secret,
         }),
     };
 };
+
+export const createHonoAuth = createHonoAuthImpl as CreateHonoAuth;

@@ -6,8 +6,8 @@ Security fixes are provided for the latest published minor version.
 
 | Version | Supported |
 | --- | --- |
-| `0.3.x` | Yes |
-| `< 0.3` | No |
+| Latest release | Yes |
+| Older releases | No |
 
 ## Reporting a vulnerability
 
@@ -44,3 +44,11 @@ Keep `AUTH_SECRET` in the API environment. Do not expose it to browser code or s
 Sliding renewal is limited by `session.maxLifetime`, which defaults to 30 days from the original login. The maximum expiry is derived from the immutable session `created_at` value and enforced by the core during resolution and renewal. Browser cookies and cached session data never outlive the authoritative session expiry.
 
 Activity and possession of the session token cannot extend this absolute limit. After it is reached, the user must authenticate again and receive a new session token.
+
+## Social authentication
+
+Configured providers use OAuth Authorization Code with PKCE `S256`. A cryptographically random state value and PKCE verifier are bound to a signed, HttpOnly transaction cookie that expires after 10 minutes. The package accepts only verified provider email addresses and stores only the normalized provider name and stable provider account ID.
+
+Provider access tokens, refresh tokens, and raw profiles are never persisted or exposed to registration callbacks. Success, error, callback, and optional registration URLs are fixed startup configuration; request parameters cannot select redirect targets.
+
+The consuming application must protect custom social registration endpoints with its normal CSRF, host, origin, rate-limit, and validation policies. `AUTH_SECRET` must remain server-only and contain at least 32 high-entropy bytes.

@@ -8,8 +8,15 @@ export type AuthData = {
     [key: string]: AuthValue;
 };
 
-export type AuthAccount = {
+export type AuthUser = {
     id: string;
+    name: string;
+};
+
+export type AuthAccount = {
+    email: string;
+    id: string;
+    user: AuthUser;
 };
 
 export type SessionRecord = {

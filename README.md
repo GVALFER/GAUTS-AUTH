@@ -1,8 +1,8 @@
 # `@gauts/auth`
 
-Database-backed password authentication and opaque browser sessions for Node.js applications.
+Database-backed password authentication, opaque browser sessions, and optional social authentication for Node.js applications.
 
-`@gauts/auth` provides the reusable authentication layer: password hashing, session lifecycle, secure cookies, database validation, optional short caching, and framework adapters. The application keeps control of registration, account lookup, authorization, routes, responses, and UI.
+`@gauts/auth` provides password hashing, session lifecycle, secure cookies, database validation, optional short caching, Prisma persistence, Hono integration, and Google/GitHub/X OAuth. The application keeps control of credential lookup, business-specific registration data, authorization, responses, and UI.
 
 ## Features
 
@@ -21,52 +21,115 @@ Database-backed password authentication and opaque browser sessions for Node.js 
 | Hono adapter                       |   ✅    | Available           |
 | Prisma adapter                     |   ✅    | Available           |
 | Next.js renewal adapter            |   ✅    | Available           |
+| Google social authentication       |   ✅    | Opt-in              |
+| GitHub social authentication       |   ✅    | Opt-in              |
+| X social authentication            |   ✅    | Opt-in              |
+| Social account registration        |   ✅    | Disabled            |
 | Session listing and revocation     |   ✅    | Available           |
 | Token rotation                     |   ❌    | Stable opaque token |
 | JWT sessions                       |   ❌    | Not used            |
 | Redis requirement                  |   ❌    | Not required        |
-| Registration, OAuth, OTP, or email |   ❌    | Application-owned   |
+| OTP and transactional email        |   ❌    | Application-owned   |
 | Route roles and permissions        |   ❌    | Application-owned   |
 
 “Session renewal” extends the existing session expiry when activity continues. It is not a refresh-token flow and does not rotate the opaque browser token.
 
-## Installation
-
-### Requirements
-
-- Node.js 22 or newer.
-- A database adapter.
-- Hono 4 when using the Hono adapter.
-- Next.js 15 or newer when using the Next.js adapter.
-
-### Hono and Prisma
-
-```bash
-npm install @gauts/auth hono @prisma/client
-```
-
-### Next.js
-
-```bash
-npm install @gauts/auth next
-```
-
-`hono` and `next` are optional peer dependencies. The Prisma adapter receives the application's generated Prisma client and does not import Prisma at runtime.
-
-### Package entry points
-
-| Import               | Purpose                                                   |
-| -------------------- | --------------------------------------------------------- |
-| `@gauts/auth`        | Password service, session core, errors, and public types. |
-| `@gauts/auth/prisma` | Prisma database adapter.                                  |
-| `@gauts/auth/hono`   | Hono cookies, methods, and middleware.                    |
-| `@gauts/auth/next`   | Next.js renewal scheduling and `Set-Cookie` forwarding.   |
-
 ## Quick start
 
-The Hono adapter does not create routes automatically. The application defines its own login, renewal, logout, and protected endpoints.
+The application defines its credential login, renewal, logout, protected endpoints, and social route paths. Optional social authentication exposes the Hono handler used inside the application-owned route.
 
-### 1. Create the auth instance
+### 1. Install the package
+
+```bash
+npm install @gauts/auth
+```
+
+Install the peer dependencies used by each application if they are not already present:
+
+```bash
+npm install hono @prisma/client
+npm install next
+```
+
+### 2. Add the Prisma schema
+
+The default adapter uses this fixed relationship tree:
+
+```text
+users
+└── user_accounts
+    ├── account_sessions
+    └── social_accounts
+```
+
+Add the following models to the API schema. `password_hash` is nullable so the same account model supports password and social authentication.
+
+```prisma
+model users {
+  id   String @id @default(uuid()) @db.VarChar(255)
+  name String @db.VarChar(255)
+
+  accounts user_accounts[]
+}
+
+model user_accounts {
+  id            String  @id @default(uuid()) @db.VarChar(255)
+  user_id       String  @db.VarChar(255)
+  email         String  @unique @db.VarChar(255)
+  password_hash String? @db.VarChar(255)
+
+  user     users             @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  sessions account_sessions[]
+  socials  social_accounts[]
+
+  @@index([user_id])
+}
+
+model account_sessions {
+  id          String    @id @default(uuid()) @db.VarChar(255)
+  account_id  String    @db.VarChar(255)
+  token_hash  String    @unique @db.VarChar(64)
+  ip          String?   @db.VarChar(45)
+  country     String?   @db.VarChar(2)
+  platform    String?   @db.VarChar(255)
+  agent       String?   @db.Text
+  expires_at  DateTime  @db.Timestamp(0)
+  revoked_at  DateTime? @db.Timestamp(0)
+  created_at  DateTime  @default(now()) @db.Timestamp(0)
+  updated_at  DateTime? @db.Timestamp(0)
+
+  account user_accounts @relation(fields: [account_id], references: [id], onDelete: Cascade)
+
+  @@index([account_id])
+  @@index([expires_at])
+  @@index([revoked_at])
+}
+
+model social_accounts {
+  id          String   @id @default(uuid()) @db.VarChar(255)
+  account_id  String   @db.VarChar(255)
+  provider    String   @db.VarChar(32)
+  provider_id String   @db.VarChar(255)
+  created_at  DateTime @default(now()) @db.Timestamp(0)
+
+  account user_accounts @relation(fields: [account_id], references: [id], onDelete: Cascade)
+
+  @@unique([provider, provider_id])
+  @@unique([account_id, provider])
+  @@index([account_id])
+}
+```
+
+Create the migration through the application's Prisma workflow, then regenerate its client:
+
+```bash
+npx prisma migrate dev --name add_auth
+npx prisma generate
+```
+
+### 3. Create the auth instance and routes
+
+Create the API auth instance:
 
 ```ts
 import { createHonoAuth } from "@gauts/auth/hono";
@@ -93,7 +156,7 @@ cache          disabled
 cookies        __ses, __cac, __ren
 ```
 
-### 2. Add the routes
+Mount the application-owned login routes and the package middleware:
 
 ```ts
 import { Hono } from "hono";
@@ -145,27 +208,67 @@ app.get("/account", auth.requireSession, (c) => {
     return c.json({
         account: c.get("account"),
         session: c.get("session"),
+        user: c.get("user"),
     });
 });
 ```
 
 When `storedHash` is missing, the package performs password work with the configured algorithm and always returns `false`. Applications do not need a dummy hash. Keep the response identical for unknown accounts and incorrect passwords.
 
-### 3. Enable the optional cache
+### 4. Connect the Next.js frontend
+
+Create the renewal adapter with the API's private URL:
 
 ```ts
-export const auth = createHonoAuth({
-    cache: {
-        ttl: 60,
-    },
-    db,
-    secret: requiredEnv("AUTH_SECRET"),
+import { createNextAuth } from "@gauts/auth/next";
+
+export const nextAuth = createNextAuth({
+    renewUrl: `${process.env.NEXT_PRIVATE_API_URL}/auth/renew`,
 });
 ```
 
-`AUTH_SECRET` must contain at least 32 high-entropy bytes. It stays in the API and is never shared with Next.js.
+Call it from the Next.js proxy on protected routes:
 
-`requiredEnv()` represents an application helper that returns a non-empty environment string or fails during startup.
+```ts
+import type { NextRequest } from "next/server";
+import { NextResponse } from "next/server";
+
+import { nextAuth } from "./lib/auth.js";
+
+export const proxy = async (request: NextRequest) => {
+    const response = NextResponse.next();
+    const renewal = await nextAuth.renew({ request, response });
+
+    if (renewal.status === 401) {
+        return NextResponse.redirect(new URL("/auth/login", request.url));
+    }
+
+    if (renewal.status !== null && renewal.status >= 500) {
+        return NextResponse.redirect(new URL("/maintenance", request.url));
+    }
+
+    return renewal.response;
+};
+```
+
+The frontend does not receive `AUTH_SECRET`. The API remains responsible for session validation and every `Set-Cookie` response.
+
+## Requirements and package entry points
+
+- Node.js 22 or newer.
+- A database adapter.
+- Hono 4 when using the Hono adapter.
+- Next.js 15 or newer when using the Next.js adapter.
+
+`hono` and `next` are optional peer dependencies. The Prisma adapter receives the application's generated Prisma client and does not import Prisma at runtime.
+
+| Import                  | Purpose                                                   |
+| ----------------------- | --------------------------------------------------------- |
+| `@gauts/auth`           | Password service, session core, errors, and public types. |
+| `@gauts/auth/prisma`    | Prisma database adapter.                                  |
+| `@gauts/auth/hono`      | Hono cookies, methods, and middleware.                    |
+| `@gauts/auth/next`      | Next.js renewal scheduling and `Set-Cookie` forwarding.   |
+| `@gauts/auth/providers` | Google, GitHub, and X OAuth providers.                    |
 
 ## Configuration reference
 
@@ -179,7 +282,8 @@ export const auth = createHonoAuth({
 | `session`  | `SessionConfig`       |           ❌            | Session defaults  | Expiry, renewal, and client validation configuration.                                               |
 | `cookie`   | `HonoCookieConfig`    |           ❌            | Cookie defaults   | Names, domain, path, SameSite, and Secure settings.                                                 |
 | `cache`    | `{ ttl: number }`     |           ❌            | Disabled          | Enables the short signed browser cache.                                                             |
-| `secret`   | `string`              | When `cache` is enabled | —                 | HMAC secret for the signed cache. Minimum 32 UTF-8 bytes.                                           |
+| `secret`   | `string`              | With `cache` or `social` | —                | HMAC secret for signed authentication data. Minimum 32 UTF-8 bytes.                                 |
+| `social`   | `SocialConfig`        |           ❌            | Disabled          | Enables configured social providers, redirects, and optional registration.                         |
 
 ```ts
 type HonoGetIp = (c: Context) => Promise<string | null | undefined> | string | null | undefined;
@@ -351,7 +455,22 @@ The cache is signed but not encrypted. Do not place passwords, password hashes, 
 
 ### Prisma adapter
 
-The default adapter requires the Prisma models `sessions` and `account`. The session model must expose an `account` relation. The default account model must contain string `id`, `email`, and `password_hash` fields. Custom account models require string `id` and `email`; their password column remains application-defined because the session adapter never reads it. Only `account.id` and `account.email` enter the payload by default.
+The Prisma adapter uses one fixed, predictable relationship tree:
+
+```text
+users
+└── user_accounts
+    ├── account_sessions
+    └── social_accounts
+```
+
+The default delegate names are `prisma.users`, `prisma.user_accounts`, `prisma.account_sessions`, and `prisma.social_accounts`. The fixed Prisma relation fields are:
+
+- `user_accounts.user`;
+- `account_sessions.account`;
+- `social_accounts.account`.
+
+There is no relation mapping configuration. Applications may rename delegates with `table`, add payload fields with `select`, and define access conditions with `access`.
 
 #### Default models
 
@@ -367,6 +486,10 @@ The resolved account payload is:
 {
     email: "owner@example.com",
     id: "account-id",
+    user: {
+        id: "user-id",
+        name: "Company name",
+    },
 }
 ```
 
@@ -378,84 +501,64 @@ The resolved account payload is:
 const db = createPrismaAdapter({
     client: prisma,
     models: {
-        account: {
-            select: ["id", "email", "name", "role"],
+        accounts: {
+            select: ["name", "role", "status", "timezone"],
             access: {
                 role: ["OWNER", "ADMIN"],
                 status: ["ACTIVE"],
+            },
+        },
+        users: {
+            select: ["role", "status"],
+            access: {
+                status: ["ACTIVE", "PENDING"],
             },
         },
     },
 });
 ```
 
-`status` is selected internally for validation but is not exposed because it is absent from `select`.
+Fields used by `access` are selected internally. They enter the returned/cached payload only when they are also present in `select`.
 
-#### Custom models and nested relations
+#### Custom delegate names
 
-Use `name` when the Prisma delegate differs from the default. Nested relation keys must match the relation fields on the parent model:
+Use `table` only when a Prisma delegate differs from the default:
 
 ```ts
 const db = createPrismaAdapter({
     client: prisma,
     models: {
-        sessions: {
-            name: "admin_sessions",
+        accounts: {
+            table: "admin_accounts",
+            select: ["name", "role", "status"],
         },
-        account: {
-            name: "user_accounts",
-            select: ["id", "email", "name", "role", "status", "timezone"],
-            access: {
-                role: ["OWNER", "ADMIN"],
-                status: ["ACTIVE"],
-            },
-            relations: {
-                user: {
-                    name: "users",
-                    select: ["id", "role", "status"],
-                    access: {
-                        status: ["ACTIVE"],
-                    },
-                },
-            },
+        sessions: {
+            table: "admin_sessions",
+        },
+        socials: {
+            table: "admin_social_accounts",
+        },
+        users: {
+            table: "admin_users",
+            select: ["role", "status"],
         },
     },
 });
 ```
 
-This configuration uses `prisma.admin_sessions`, `prisma.user_accounts`, and `prisma.users`. The root relation on `admin_sessions` must still be named `account`.
+| Property                 | Type / allowed values                   | Required | Default                | Description                                                               |
+| ------------------------ | --------------------------------------- | :------: | ---------------------- | ------------------------------------------------------------------------- |
+| `client`                 | Generated Prisma client                 |    ✅    | —                      | Prisma client containing the four auth models.                            |
+| `models.users.table`     | Compatible user delegate name           |    ❌    | `"users"`              | Overrides the user delegate.                                              |
+| `models.users.select`    | Unique scalar field array               |    ❌    | `[]`                   | Adds payload fields; `id` and `name` are always included.                 |
+| `models.users.access`    | Scalar equality or allowed-value arrays |    ❌    | `{}`                   | Conditions required on the owning user/entity.                            |
+| `models.accounts.table`  | Compatible account delegate name        |    ❌    | `"user_accounts"`      | Overrides the account delegate.                                           |
+| `models.accounts.select` | Unique scalar field array               |    ❌    | `[]`                   | Adds payload fields; `id` and `email` are always included.                |
+| `models.accounts.access` | Scalar equality or allowed-value arrays |    ❌    | `{}`                   | Conditions required on the authenticating account.                        |
+| `models.sessions.table`  | Compatible session delegate name        |    ❌    | `"account_sessions"`   | Overrides authoritative session persistence.                              |
+| `models.socials.table`   | Compatible social delegate name         |    ❌    | `"social_accounts"`    | Overrides provider association persistence.                               |
 
-When a relation name differs from its target model, the object key identifies the relation and `name` identifies the delegate:
-
-```ts
-relations: {
-    owner: {
-        name: "users",
-        select: ["id", "email", "status"],
-        access: {
-            status: ["ACTIVE"],
-        },
-    },
-}
-```
-
-This loads the `account.owner` relation using the `prisma.users` model metadata.
-
-| Property                              | Type / allowed values                     | Required | Default              | Description                                                                 |
-| ------------------------------------- | ----------------------------------------- | :------: | -------------------- | --------------------------------------------------------------------------- |
-| `client`                              | Generated Prisma client                   |    ✅    | —                    | Prisma client containing every configured model.                            |
-| `models.sessions.name`                | Compatible session delegate name          |    ❌    | `"sessions"`         | Overrides the Prisma model used to persist sessions.                         |
-| `models.account.name`                 | Account delegate with string `id`, `email` |    ❌    | `"account"`          | Identifies a custom account model. Its password column may use any name.      |
-| `models.account.select`               | Unique scalar field array                 |    ❌    | `["id", "email"]`    | Fields exposed in `account` and the signed cache. `id` is always included.   |
-| `models.account.access`               | Scalar equality or allowed-value arrays   |    ❌    | `{}`                 | Conditions required for authentication.                                     |
-| `models.account.relations`            | Relation configuration object             |    ❌    | `{}`                 | Additional required to-one relations loaded inside `account`.               |
-| `models.account.relations[key].name`  | Compatible related-model delegate name    |    ❌    | Relation key         | Identifies the related model and types its `select` and `access`.            |
-| `models.account.relations[key].select`| Unique scalar field array                 |    ❌    | `["id"]`             | Fields exposed under that relation. `id` is always included.                 |
-| `models.account.relations[key].access`| Scalar equality or allowed-value arrays   |    ❌    | `{}`                 | Conditions required on the related record.                                  |
-
-The root Prisma relation on the session model is always named `account`. Keys inside `relations` are the actual Prisma relation field names. `name` identifies the target Prisma model/delegate; it does not rename a relation or a physical SQL table.
-
-`select` accepts only JSON-safe scalar fields. It controls the public account payload and receives autocomplete from the generated Prisma client. Treat it as an explicit allowlist: never select passwords, password hashes, tokens, or other secrets because the cache is signed, not encrypted. Fields used only by `access` are selected for validation and removed before the account is exposed or cached.
+`select` accepts JSON-safe scalar fields and receives autocomplete from the generated Prisma client. `password`, `hash`, `password_hash`, and `passwordHash` are rejected by both TypeScript and runtime validation. Never select tokens or other secrets because the optional cache is signed, not encrypted.
 
 Each `access` condition is either an exact scalar value or an array of accepted values:
 
@@ -466,7 +569,7 @@ access: {
 }
 ```
 
-All configured conditions and nested relations must match. Omitting `access` applies no application-specific account restriction.
+Every configured account and user condition must match. Omitting `access` applies no application-specific account restriction.
 
 ### Next.js adapter
 
@@ -492,8 +595,8 @@ export const nextAuth = createNextAuth({
 credentials accepted
     -> generate 256-bit opaque token
     -> store SHA-256 token hash in DB
-    -> load selected current account data and configured relations
-    -> apply configured access rules
+    -> load current account and owning user
+    -> apply configured account/user access rules
     -> write __ses
     -> write __ren
     -> optionally write __cac
@@ -516,7 +619,7 @@ session token
 session token
     -> SHA-256 hash
     -> indexed DB lookup
-    -> validate expiry, revocation, account access, configured relations, and client
+    -> validate expiry, revocation, account/user access, and client
     -> clear short cache
     -> continue
 ```
@@ -534,61 +637,6 @@ Next reads __ren
 
 `auth.session.resolve()` is always DB-backed and read-only. Only explicit renewal updates database expiry.
 
-## Prisma schema
-
-The default Prisma adapter resolves:
-
-```text
-sessions -> account
-```
-
-The following is a complete MySQL/MariaDB example for email/password authentication. The account model requires `id`, `email`, and `password_hash`; the password hash is used only by the application's login query and never enters the session payload.
-
-```prisma
-model account {
-  id            String @id @default(uuid()) @db.VarChar(255)
-  email         String @unique @db.VarChar(255)
-  password_hash String @db.VarChar(255)
-
-  sessions sessions[]
-}
-
-model sessions {
-  id          String    @id @default(uuid()) @db.VarChar(255)
-  account_id  String    @db.VarChar(255)
-  token_hash  String    @unique @db.VarChar(64)
-  ip          String?   @db.VarChar(45)
-  country     String?   @db.VarChar(2)
-  platform    String?   @db.VarChar(255)
-  agent       String?   @db.Text
-  expires_at  DateTime  @db.Timestamp(0)
-  revoked_at  DateTime? @db.Timestamp(0)
-  created_at  DateTime  @default(now()) @db.Timestamp(0)
-  updated_at  DateTime? @db.Timestamp(0)
-
-  account account @relation(fields: [account_id], references: [id], onDelete: Cascade)
-
-  @@index([account_id])
-  @@index([expires_at])
-  @@index([revoked_at])
-}
-```
-
-Required fields and relation names:
-
-| Path               | Required fields                                                                                                     |
-| ------------------ | ------------------------------------------------------------------------------------------------------------------- |
-| Session model      | `id`, `account_id`, `token_hash`, `ip`, `platform`, `agent`, `expires_at`, `revoked_at`, `created_at`, `updated_at` |
-| `account` relation | String `id`, `email`, and `password_hash`                                                                           |
-
-The session relation must be named `account`. Additional account fields and nested relations are selected through `models.account`. Application models may add fields, indexes, defaults, mappings, and relations. Access fields may use Prisma enums, strings, booleans, numbers, or null.
-
-Keep `agent` large enough for the complete User-Agent. Use provider-compatible native annotations when the database is not MySQL/MariaDB.
-
-`models.sessions.name` and every model `name` are Prisma client delegate names. Physical SQL table names remain an application concern and can use Prisma `@@map` without changing the adapter configuration.
-
-Create and run migrations through the application's Prisma workflow. The package never manages migrations.
-
 ## Hono adapter
 
 ### Request values
@@ -598,11 +646,17 @@ Create and run migrations through the application's Prisma workflow. The package
 ```ts
 const account = c.get("account");
 const session = c.get("session");
+const user = c.get("user");
 ```
 
 ```ts
 type AuthAccount = {
+    email: string;
     id: string;
+    user: {
+        id: string;
+        name: string;
+    };
 };
 
 type Session = {
@@ -619,9 +673,9 @@ type Session = {
 };
 ```
 
-The Prisma adapter refines `AuthAccount` with the exact fields and nested relations declared in `select`.
+The Prisma adapter refines `account` and `user` with the exact additional scalar fields declared in their respective `select` arrays.
 
-Only `account_id` is copied from the account payload into the session row. Current selected account data and configured relations are loaded through the database relation and never copied into the table.
+Only `account_id` is copied into the session row. Current account/user data is loaded through the fixed database relations and is never duplicated in the session table.
 
 ### Login country metadata
 
@@ -650,6 +704,185 @@ await auth.createSession({
 | `auth.requireSession`                         | Hono middleware that authenticates and populates the context.              |
 
 `requireSession` authenticates only. Application-specific route permissions remain the application's responsibility.
+
+## Social authentication
+
+Social authentication is disabled unless `social` is configured. Import providers separately so applications only include the providers they use:
+
+```ts
+import { createHonoAuth } from "@gauts/auth/hono";
+import { createPrismaAdapter } from "@gauts/auth/prisma";
+import { github, google, x } from "@gauts/auth/providers";
+
+export const auth = createHonoAuth({
+    db: createPrismaAdapter({ client: prisma }),
+    secret: requiredEnv("AUTH_SECRET"),
+    social: {
+        errorUrl: "https://app.example.com/auth/login",
+        providers: [
+            google({
+                callbackUrl: "https://app.example.com/proxy/auth/social/google/callback",
+                clientId: requiredEnv("GOOGLE_CLIENT_ID"),
+                clientSecret: requiredEnv("GOOGLE_CLIENT_SECRET"),
+            }),
+            github({
+                callbackUrl: "https://app.example.com/proxy/auth/social/github/callback",
+                clientId: requiredEnv("GITHUB_CLIENT_ID"),
+                clientSecret: requiredEnv("GITHUB_CLIENT_SECRET"),
+            }),
+            x({
+                callbackUrl: "https://app.example.com/proxy/auth/social/x/callback",
+                clientId: requiredEnv("X_CLIENT_ID"),
+                clientSecret: requiredEnv("X_CLIENT_SECRET"),
+            }),
+        ],
+        successUrl: "https://app.example.com/dashboard",
+    },
+});
+```
+
+Declare one application route for every configured provider and supported action:
+
+```ts
+app.get("/auth/social/:provider/:action", async (c) => {
+    return auth.social.handle(c);
+});
+```
+
+The same route handles the explicit `start` and `callback` paths:
+
+```text
+GET /proxy/auth/social/google/start?intent=login
+GET /proxy/auth/social/google/start?intent=register
+GET /proxy/auth/social/google/callback
+GET /proxy/auth/social/github/start?intent=login
+GET /proxy/auth/social/github/callback
+GET /proxy/auth/social/x/start?intent=login
+GET /proxy/auth/social/x/callback
+```
+
+`intent` defaults to `login`. Only `start` and `callback` are accepted as actions. The public `/proxy` path in this example is expected to forward to the Hono `/auth` path. Provider callback URLs must exactly match the public callback paths registered with each provider.
+
+The package does not create or mount routes. Applications may wrap `auth.social.handle(c)` with their own logging, metrics, rate limiting, or other route-level behavior.
+
+### Social configuration
+
+| Property                     | Type / allowed values                 | Required | Default       | Description                                                                  |
+| ---------------------------- | ------------------------------------- | :------: | ------------- | ---------------------------------------------------------------------------- |
+| `social.providers`           | `SocialProvider[]`                    |    ✅    | —             | Configured Google, GitHub, or X providers.                                   |
+| `social.successUrl`          | Absolute HTTP(S) URL                  |    ✅    | —             | Fixed redirect after session creation.                                       |
+| `social.errorUrl`            | Absolute HTTP(S) URL                  |    ✅    | —             | Fixed redirect for expected provider/authentication failures.                |
+| `social.cookieName`          | Valid cookie name                     |    ❌    | `"__soc"`     | Signed temporary OAuth/registration transaction cookie.                      |
+| `social.registration`        | `SocialRegistrationConfig`            |    ❌    | Disabled      | Enables default or application-specific social registration.                 |
+| `registration.registerUrl`   | Absolute HTTP(S) URL                  |    ❌    | Direct        | Defers account creation to an application form.                              |
+| `registration.createAccount` | Async callback returning `accountId`  | Conditional | Built-in   | Creates required business data when the default structure is insufficient.   |
+
+Provider configuration:
+
+| Property       | Type                 | Required | Description                                                  |
+| -------------- | -------------------- | :------: | ------------------------------------------------------------ |
+| `clientId`     | Non-empty string     |    ✅    | Public OAuth client identifier.                              |
+| `clientSecret` | Non-empty string     |    ✅    | Server-only OAuth client secret.                             |
+| `callbackUrl`  | Absolute HTTP(S) URL |    ✅    | Exact public callback URL registered with the provider.      |
+
+The normalized verified identity is:
+
+```ts
+type SocialIdentity = {
+    avatarUrl: string | null;
+    email: string;
+    name: string;
+    provider: "google" | "github" | "x";
+    providerId: string;
+    username: string | null;
+};
+```
+
+Provider access/refresh tokens and raw provider profiles are never exposed to application callbacks or persisted.
+
+### Registration modes
+
+Login only (default):
+
+```ts
+social: {
+    errorUrl,
+    providers: [googleProvider],
+    successUrl,
+}
+```
+
+Default registration creates `users { id, name }`, `user_accounts { id, email, user_id }`, the provider link, and the session:
+
+```ts
+social: {
+    errorUrl,
+    providers: [googleProvider],
+    registration: {},
+    successUrl,
+}
+```
+
+This requires every additional application column on `users` and `user_accounts` to be nullable or have a database default.
+
+For additional required form data, configure a registration URL and callback:
+
+```ts
+import type { SocialRegistrationInput } from "@gauts/auth";
+
+type RegisterData = {
+    companyNumber: string;
+};
+
+social: {
+    errorUrl,
+    providers: [googleProvider],
+    registration: {
+        registerUrl: "https://app.example.com/auth/register/social",
+        createAccount: async ({ data, identity }: SocialRegistrationInput<RegisterData>) => {
+            const account = await createApplicationAccount({
+                companyNumber: data.companyNumber,
+                email: identity.email,
+                name: identity.name,
+            });
+
+            return { accountId: account.id };
+        },
+    },
+    successUrl,
+}
+```
+
+The application endpoint reads the verified identity and completes registration:
+
+```ts
+app.get("/auth/register/social", (c) => {
+    return c.json(auth.social.getRegistration(c));
+});
+
+app.post("/auth/register/social", async (c) => {
+    const data = await c.req.json<{ companyNumber: string }>();
+
+    await auth.social.completeRegistration({
+        context: c,
+        data,
+    });
+
+    return c.json({ registered: true });
+});
+```
+
+`registerUrl` requires `createAccount`; otherwise submitted application data would have no owner. `createAccount` must create the fixed `users`/`user_accounts` relation and return the created account ID. The package then creates `social_accounts` and the authenticated session.
+
+### OAuth security
+
+- Authorization Code flow with PKCE `S256` is used for every provider.
+- State and the PKCE verifier live in the signed, HttpOnly `__soc` cookie for at most 10 minutes.
+- The temporary cookie is cleared after success or expected failure.
+- Only provider-verified email addresses are accepted.
+- Provider IDs, not email addresses, are the stable social link identifiers.
+- Redirect URLs come only from startup configuration; request query parameters cannot choose them.
+- Social OAuth requires `SameSite=Lax` or `SameSite=None`; `Strict` fails during startup.
 
 ### Core and adapter composition
 
@@ -759,11 +992,27 @@ const db = {
 
 `findToken` receives only the SHA-256 token hash. It must return the current selected account plus an `allowed` result. Raw tokens must never be persisted.
 
+Custom adapters used with `social` must additionally implement `SocialDbAdapter`:
+
+```ts
+import type { SocialDbAdapter } from "@gauts/auth";
+
+const socialDb = {
+    createAccount: async ({ email, name }) => accountId,
+    createSocial: async (record) => {},
+    findAccount: async (account_id) => null,
+    findEmail: async (email) => null,
+    findSocial: async ({ provider, provider_id }) => null,
+} satisfies SocialDbAdapter;
+```
+
+The Prisma adapter already implements both `DbAdapter` and `SocialDbAdapter`.
+
 ## Performance
 
 The package contains no Redis or in-process cache.
 
-Without the optional browser cache, each `requireSession` performs an indexed database lookup through `sessions.token_hash`.
+Without the optional browser cache, each `requireSession` performs an indexed database lookup through `account_sessions.token_hash`.
 
 With a valid cache, `GET` and `HEAD` skip the lookup until `cache.ttl` expires. Unsafe methods always use current database state.
 
@@ -774,6 +1023,12 @@ The tradeoff is explicit: revocation and selected account or relation changes ma
 ```ts
 type AuthErrorCode =
     | "AUTH_CONFIG_INVALID"
+    | "SOCIAL_ACCOUNT_INVALID"
+    | "SOCIAL_ACCOUNT_NOT_FOUND"
+    | "SOCIAL_EMAIL_INVALID"
+    | "SOCIAL_PROVIDER_ERROR"
+    | "SOCIAL_REGISTRATION_INVALID"
+    | "SOCIAL_STATE_INVALID"
     | "PASSWORD_INPUT_INVALID"
     | "SESSION_CLIENT_MISMATCH"
     | "SESSION_DATA_INVALID"
@@ -787,6 +1042,12 @@ Use `isAuthError(error)` before reading `error.code`.
 | Code                      | Suggested HTTP status | Meaning                                                           |
 | ------------------------- | --------------------: | ----------------------------------------------------------------- |
 | `AUTH_CONFIG_INVALID`     |                 `500` | Invalid startup configuration.                                    |
+| `SOCIAL_ACCOUNT_INVALID` |                 `403` | Linked account or owning user failed configured access rules.      |
+| `SOCIAL_ACCOUNT_NOT_FOUND` |               `401` | Provider identity is not linked and registration is unavailable.  |
+| `SOCIAL_EMAIL_INVALID`   |                 `400` | Provider did not return a verified usable email address.           |
+| `SOCIAL_PROVIDER_ERROR`  |                 `401` | Provider denied or failed the OAuth exchange.                      |
+| `SOCIAL_REGISTRATION_INVALID` |            `400` | Custom registration did not return a valid account ID.             |
+| `SOCIAL_STATE_INVALID`   |                 `400` | OAuth/registration state is missing, altered, or expired.          |
 | `PASSWORD_INPUT_INVALID`  |                 `400` | Password input violates configured limits.                        |
 | `SESSION_CLIENT_MISMATCH` |                 `403` | A configured client field does not match; the session is revoked. |
 | `SESSION_DATA_INVALID`    |                 `400` | Invalid session or renewal data.                                  |

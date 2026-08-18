@@ -27,6 +27,12 @@ export const isAuthValue = (value: unknown): value is AuthValue => {
 
 export const isAuthAccount = (value: unknown): value is AuthAccount => {
     return (
-        isRecord(value) && typeof value.id === "string" && Object.values(value).every(isAuthValue)
+        isRecord(value) &&
+        typeof value.email === "string" &&
+        typeof value.id === "string" &&
+        isRecord(value.user) &&
+        typeof value.user.id === "string" &&
+        typeof value.user.name === "string" &&
+        Object.values(value).every(isAuthValue)
     );
 };

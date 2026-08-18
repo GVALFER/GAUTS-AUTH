@@ -41,17 +41,30 @@ export const parseRenewAt = (value?: string | null): number | null => {
     return Number.isSafeInteger(seconds) ? seconds : null;
 };
 
-export const resolveSessionCookieName = (input?: string): string => {
-    const name = input ?? COOKIE_DEFAULTS.sessionName;
+export const resolveCookieName = ({
+    input,
+    label,
+}: {
+    input: string;
+    label: string;
+}): string => {
+    const name = input;
 
     if (!cookieNamePattern.test(name)) {
         throw createError({
             code: "AUTH_CONFIG_INVALID",
-            message: "Session cookie name is invalid.",
+            message: `${label} cookie name is invalid.`,
         });
     }
 
     return name;
+};
+
+export const resolveSessionCookieName = (input?: string): string => {
+    return resolveCookieName({
+        input: input ?? COOKIE_DEFAULTS.sessionName,
+        label: "Session",
+    });
 };
 
 export const resolveSessionCookieNames = (

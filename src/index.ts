@@ -17,6 +17,7 @@ export type {
     AuthData,
     AuthScalar,
     AuthSessionRecord,
+    AuthUser,
     AuthValue,
     CreateSessionRecord,
     CreatedSession,
@@ -30,3 +31,18 @@ export type {
 } from "./session/types.js";
 export type { SessionClient, SessionClientInput } from "./client/index.js";
 export type { SessionCacheConfig } from "./session/cache.js";
+export type {
+    CreateSocialRecord,
+    SocialAccountRecord,
+    SocialAuthorizationInput,
+    SocialCallbackInput,
+    SocialConfig,
+    SocialDbAdapter,
+    SocialIdentity,
+    SocialIntent,
+    SocialProvider,
+    SocialProviderId,
+    SocialRegistrationConfig,
+    SocialRegistrationInput,
+    SocialRegistrationResult,
+} from "./social/types.js";

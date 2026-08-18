@@ -1,3 +1,4 @@
+import type { SocialDbAdapter } from "../../social/types.js";
 import type { AuthAccount, AuthScalar, DbAdapter, SessionRecord } from "../../session/types.js";
 
 type DelegateMeta<T> = T[Extract<keyof T, symbol>];
@@ -17,47 +18,68 @@ type IsSessionModel<T> = [DelegateRow<T>] extends [never]
       ? true
       : false;
 
-type IsRelationModel<T> =
-    IsSessionModel<T> extends true ? false : DelegateRow<T> extends { id: string } ? true : false;
+type IsAccountModel<T> = [DelegateRow<T>] extends [never]
+    ? false
+    : DelegateRow<T> extends { email: string; id: string; user_id: string }
+      ? true
+      : false;
 
-type IsAccountModel<T> =
-    IsSessionModel<T> extends true
-        ? false
-        : DelegateRow<T> extends {
-                email: string;
-                id: string;
-            }
-          ? true
-          : false;
+type IsUserModel<T> = [DelegateRow<T>] extends [never]
+    ? false
+    : DelegateRow<T> extends { id: string; name: string }
+      ? DelegateRow<T> extends { email: string }
+          ? false
+          : true
+      : false;
 
-type IsDefaultAccountModel<T> =
-    IsAccountModel<T> extends true
-        ? DelegateRow<T> extends { password_hash: string }
-            ? true
-            : false
-        : false;
+type IsSocialModel<T> = [DelegateRow<T>] extends [never]
+    ? false
+    : DelegateRow<T> extends {
+            account_id: string;
+            created_at: Date;
+            id: string;
+            provider: string;
+            provider_id: string;
+        }
+      ? true
+      : false;
 
-export type PrismaSessionModel<Client> = {
-    [Key in keyof Client]: IsSessionModel<Client[Key]> extends true ? Key : never;
+type ModelName<Client, Kind extends "account" | "session" | "social" | "user"> = {
+    [Key in keyof Client]: Kind extends "account"
+        ? IsAccountModel<Client[Key]> extends true
+            ? Key
+            : never
+        : Kind extends "session"
+          ? IsSessionModel<Client[Key]> extends true
+              ? Key
+              : never
+          : Kind extends "social"
+            ? IsSocialModel<Client[Key]> extends true
+                ? Key
+                : never
+            : IsUserModel<Client[Key]> extends true
+              ? Key
+              : never;
 }[keyof Client] &
     string;
 
-export type PrismaAccountModel<Client> = {
-    [Key in keyof Client]: IsAccountModel<Client[Key]> extends true ? Key : never;
-}[keyof Client] &
-    string;
-
-type PrismaRelationModel<Client> = {
-    [Key in keyof Client]: IsRelationModel<Client[Key]> extends true ? Key : never;
-}[keyof Client] &
-    string;
+export type PrismaAccountModel<Client> = ModelName<Client, "account">;
+export type PrismaSessionModel<Client> = ModelName<Client, "session">;
+export type PrismaSocialModel<Client> = ModelName<Client, "social">;
+export type PrismaUserModel<Client> = ModelName<Client, "user">;
 
 type ModelRow<Client, Name extends string> = Name extends keyof Client
     ? DelegateRow<Client[Name]>
     : never;
 
+type PrivateField = "hash" | "password" | "password_hash" | "passwordHash";
+
 type AuthField<Row> = {
-    [Key in keyof Row]: Row[Key] extends AuthScalar ? Key : never;
+    [Key in keyof Row]: Key extends PrivateField
+        ? never
+        : Row[Key] extends AuthScalar
+          ? Key
+          : never;
 }[keyof Row] &
     string;
 
@@ -67,65 +89,71 @@ type ModelAccess<Row> = Partial<{
     [Key in AuthField<Row>]: AccessRule<Row[Key]>;
 }>;
 
-type ModelConfig<Client, Name extends string, NameRequired extends boolean> = {
+type DataModelConfig<Client, Name extends string> = {
     access?: ModelAccess<ModelRow<Client, Name>>;
-    relations?: PrismaRelations<Client>;
     select?: readonly AuthField<ModelRow<Client, Name>>[];
-} & (NameRequired extends true ? { name: Name } : { name?: Name });
+    table?: Name;
+};
 
-type ModelChoice<Client, NameRequired extends boolean> = {
-    [Name in PrismaRelationModel<Client>]: ModelConfig<Client, Name, NameRequired>;
-}[PrismaRelationModel<Client>];
+type TableModelConfig<Name extends string> = {
+    table?: Name;
+};
 
-type AccountChoice<Client, NameRequired extends boolean> = {
-    [Name in PrismaAccountModel<Client>]: ModelConfig<Client, Name, NameRequired>;
-}[PrismaAccountModel<Client>];
-
-type DefaultAccountConfig<Client> = "account" extends keyof Client
-    ? IsDefaultAccountModel<Client["account"]> extends true
-        ? Omit<ModelConfig<Client, "account", false>, "name"> & {
-              name?: "account";
-          }
-        : never
+type ModelChoice<
+    Client,
+    Name extends string,
+    Default extends string,
+    Data extends boolean,
+> = Name extends unknown
+    ? Data extends true
+        ? DataModelConfig<Client, Name> &
+              (Name extends Default ? { table?: Name } : { table: Name })
+        : TableModelConfig<Name> & (Name extends Default ? { table?: Name } : { table: Name })
     : never;
 
-type CustomAccountConfig<Client> = AccountChoice<Client, true>;
+export type PrismaUserConfig<Client> = ModelChoice<Client, PrismaUserModel<Client>, "users", true>;
 
-export type PrismaAccountConfig<Client> =
-    DefaultAccountConfig<Client> | CustomAccountConfig<Client>;
+export type PrismaAccountConfig<Client> = ModelChoice<
+    Client,
+    PrismaAccountModel<Client>,
+    "user_accounts",
+    true
+>;
 
-export type PrismaRelations<Client> = Record<string, ModelChoice<Client, false>>;
+export type PrismaSessionConfig<Client> = ModelChoice<
+    Client,
+    PrismaSessionModel<Client>,
+    "account_sessions",
+    false
+>;
 
-type DefaultSessionConfig<Client> =
-    "sessions" extends PrismaSessionModel<Client> ? { name?: "sessions" } : never;
+export type PrismaSocialConfig<Client> = ModelChoice<
+    Client,
+    PrismaSocialModel<Client>,
+    "social_accounts",
+    false
+>;
 
-type CustomSessionConfig<Client> = {
-    [Name in PrismaSessionModel<Client>]: { name: Name };
-}[PrismaSessionModel<Client>];
+export type PrismaModelsConfig<Client> = {
+    accounts?: PrismaAccountConfig<Client>;
+    sessions?: PrismaSessionConfig<Client>;
+    socials?: PrismaSocialConfig<Client>;
+    users?: PrismaUserConfig<Client>;
+};
 
-export type PrismaSessionConfig<Client> =
-    DefaultSessionConfig<Client> | CustomSessionConfig<Client>;
+type HasModel<Client, Name extends string, Kind extends "account" | "session" | "social" | "user"> =
+    Name extends ModelName<Client, Kind> ? true : false;
 
-type AccountProperty<Client> = "account" extends keyof Client
-    ? IsDefaultAccountModel<Client["account"]> extends true
-        ? { account?: PrismaAccountConfig<Client> }
-        : { account: CustomAccountConfig<Client> }
-    : { account: CustomAccountConfig<Client> };
-
-type SessionProperty<Client> =
-    "sessions" extends PrismaSessionModel<Client>
-        ? { sessions?: PrismaSessionConfig<Client> }
-        : { sessions: CustomSessionConfig<Client> };
-
-export type PrismaModelsConfig<Client> = AccountProperty<Client> & SessionProperty<Client>;
-
-type HasDefaults<Client> = "account" extends keyof Client
-    ? IsDefaultAccountModel<Client["account"]> extends true
-        ? "sessions" extends PrismaSessionModel<Client>
-            ? true
+type HasDefaults<Client> =
+    HasModel<Client, "users", "user"> extends true
+        ? HasModel<Client, "user_accounts", "account"> extends true
+            ? HasModel<Client, "account_sessions", "session"> extends true
+                ? HasModel<Client, "social_accounts", "social"> extends true
+                    ? true
+                    : false
+                : false
             : false
-        : false
-    : false;
+        : false;
 
 export type PrismaAdapterInput<
     Client extends object,
@@ -136,48 +164,41 @@ export type PrismaAdapterInput<
         : never
     : { client: Client; models: Models };
 
-type ConfigName<Config, Default extends string> = Config extends { name: infer Name extends string }
+type ModelConfig<Models, Key extends keyof PrismaModelsConfig<object>> =
+    Models extends Record<Key, infer Config> ? Config : Record<never, never>;
+
+type ConfigTable<Config, Default extends string> = Config extends {
+    table: infer Name extends string;
+}
     ? Name
     : Default;
 
 type ConfigSelect<Config, Default extends string> = Config extends {
     select: readonly (infer Field extends string)[];
 }
-    ? Field | "id"
+    ? Field | Default
     : Default;
-
-type ConfigRelations<Config> = Config extends { relations: infer Relations }
-    ? Relations
-    : Record<never, never>;
 
 type SelectedModel<
     Client,
     Config,
-    DefaultName extends string,
-    DefaultSelect extends string = "id",
-> =
-    ConfigName<Config, DefaultName> extends infer Name extends string
-        ? Pick<
-              ModelRow<Client, Name>,
-              ConfigSelect<Config, DefaultSelect> & keyof ModelRow<Client, Name>
-          > & {
-              [
-                  Relation in keyof ConfigRelations<Config>
-              ]: ConfigRelations<Config>[Relation] extends infer RelationConfig
-                  ? SelectedModel<Client, RelationConfig, Relation & string>
-                  : never;
-          }
-        : never;
+    DefaultTable extends string,
+    DefaultSelect extends string,
+> = Pick<
+    ModelRow<Client, ConfigTable<Config, DefaultTable>>,
+    ConfigSelect<Config, DefaultSelect> & keyof ModelRow<Client, ConfigTable<Config, DefaultTable>>
+>;
 
-type ModelsAccount<Models> = Models extends { account: infer Account }
-    ? Account
-    : Record<never, never>;
+export type PrismaUser<
+    Client,
+    Models extends PrismaModelsConfig<Client> | undefined = undefined,
+> = SelectedModel<Client, ModelConfig<Models, "users">, "users", "id" | "name">;
 
 export type PrismaAccount<
     Client,
     Models extends PrismaModelsConfig<Client> | undefined = undefined,
-> = SelectedModel<Client, ModelsAccount<Models>, "account", "id" | "email"> & {
-    id: string;
+> = SelectedModel<Client, ModelConfig<Models, "accounts">, "user_accounts", "email" | "id"> & {
+    user: PrismaUser<Client, Models>;
 };
 
 export type PrismaDelegate = {
@@ -191,23 +212,24 @@ export type PrismaDelegate = {
 
 export type PrismaAccessValue = AuthScalar | readonly AuthScalar[];
 
-export type ResolvedPrismaModel = {
+export type ResolvedPrismaDataModel = {
     access: Record<string, PrismaAccessValue>;
-    name: string;
-    relation: string;
-    relations: Record<string, ResolvedPrismaModel>;
     select: readonly string[];
+    table: string;
 };
 
 export type ResolvedPrismaModels = {
-    account: ResolvedPrismaModel;
+    accounts: ResolvedPrismaDataModel;
     sessions: string;
+    socials: string;
+    users: ResolvedPrismaDataModel;
 };
 
 export type PrismaDb<
     Client extends object,
     Models extends PrismaModelsConfig<Client> | undefined,
-> = DbAdapter<PrismaAccount<Client, Models>>;
+> = DbAdapter<PrismaAccount<Client, Models> & AuthAccount> &
+    SocialDbAdapter<PrismaAccount<Client, Models> & AuthAccount>;
 
 export type CreatePrismaAdapter = {
     <Client extends object>(input: PrismaAdapterInput<Client>): PrismaDb<Client, undefined>;

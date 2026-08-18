@@ -4,30 +4,44 @@ import type { AuthScalar } from "../../session/types.js";
 import type {
     PrismaAccessValue,
     PrismaDelegate,
-    ResolvedPrismaModel,
+    ResolvedPrismaDataModel,
     ResolvedPrismaModels,
 } from "./types.js";
 
 const PRISMA_DEFAULTS = {
-    account: {
-        name: "account",
+    accounts: {
         select: ["id", "email"],
-    },
-    relation: {
-        select: ["id"],
+        table: "user_accounts",
     },
     sessions: {
-        name: "sessions",
+        table: "account_sessions",
     },
+    socials: {
+        table: "social_accounts",
+    },
+    users: {
+        select: ["id", "name"],
+        table: "users",
+    },
+    privateFields: ["hash", "password", "password_hash", "passwordHash"],
 } as const;
 
-type ResolveModelInput = {
+const isPrivateField = (value: string): boolean => {
+    return PRISMA_DEFAULTS.privateFields.some((field) => field === value);
+};
+
+type ResolveDataModelInput = {
     client: object;
-    defaultName: string;
+    defaultSelect: readonly string[];
+    defaultTable: string;
+    input: unknown;
+    path: string;
+};
+
+type ResolveSelectInput = {
     defaultSelect: readonly string[];
     input: unknown;
     path: string;
-    relation: string;
 };
 
 export const isPrismaDelegate = (value: unknown): value is PrismaDelegate => {
@@ -51,42 +65,38 @@ const isAuthScalar = (value: unknown): value is AuthScalar => {
     );
 };
 
-const resolveName = ({ input, path }: { input: unknown; path: string }): string => {
+const resolveTable = ({ input, path }: { input: unknown; path: string }): string => {
     if (typeof input !== "string" || !input.trim()) {
         throw createError({
             code: "AUTH_CONFIG_INVALID",
-            message: `${path} must be a non-empty string.`,
+            message: `${path}.table must be a non-empty string.`,
         });
     }
 
     return input;
 };
 
-const resolveSelect = ({
-    defaultSelect,
-    input,
-    path,
-}: {
-    defaultSelect: readonly string[];
-    input: unknown;
-    path: string;
-}): readonly string[] => {
+const requireDelegate = ({ client, table }: { client: object; table: string }): void => {
+    const delegate = isRecord(client) ? client[table] : undefined;
+
+    if (!isPrismaDelegate(delegate)) {
+        throw createError({
+            code: "AUTH_CONFIG_INVALID",
+            message: `Prisma model ${table} is invalid.`,
+        });
+    }
+};
+
+const resolveSelect = ({ defaultSelect, input, path }: ResolveSelectInput): readonly string[] => {
     if (input === undefined) {
         return defaultSelect;
     }
 
-    if (!Array.isArray(input)) {
-        throw createError({
-            code: "AUTH_CONFIG_INVALID",
-            message: `${path}.select must contain unique non-empty field names.`,
-        });
-    }
-
-    const fields: unknown[] = input;
-
     if (
-        fields.some((field) => typeof field !== "string" || !field.trim()) ||
-        new Set(fields).size !== fields.length
+        !Array.isArray(input) ||
+        input.some((field) => typeof field !== "string" || !field.trim()) ||
+        new Set(input).size !== input.length ||
+        input.some((field) => typeof field === "string" && isPrivateField(field))
     ) {
         throw createError({
             code: "AUTH_CONFIG_INVALID",
@@ -94,17 +104,13 @@ const resolveSelect = ({
         });
     }
 
-    const names = fields as string[];
-
-    return names.includes("id") ? names : ["id", ...names];
+    return [...new Set([...defaultSelect, ...(input as string[])])];
 };
 
 const isAccessValue = (value: unknown): value is PrismaAccessValue => {
-    if (Array.isArray(value)) {
-        return value.length > 0 && value.every(isAuthScalar);
-    }
-
-    return isAuthScalar(value);
+    return Array.isArray(value)
+        ? value.length > 0 && value.every(isAuthScalar)
+        : isAuthScalar(value);
 };
 
 const resolveAccess = ({ input, path }: { input: unknown; path: string }) => {
@@ -112,7 +118,11 @@ const resolveAccess = ({ input, path }: { input: unknown; path: string }) => {
         return {};
     }
 
-    if (!isRecord(input) || Object.values(input).some((value) => !isAccessValue(value))) {
+    if (
+        !isRecord(input) ||
+        Object.keys(input).some(isPrivateField) ||
+        Object.values(input).some((value) => !isAccessValue(value))
+    ) {
         throw createError({
             code: "AUTH_CONFIG_INVALID",
             message: `${path}.access contains an invalid condition.`,
@@ -122,14 +132,13 @@ const resolveAccess = ({ input, path }: { input: unknown; path: string }) => {
     return input as Record<string, PrismaAccessValue>;
 };
 
-const resolveModel = ({
+const resolveDataModel = ({
     client,
-    defaultName,
     defaultSelect,
+    defaultTable,
     input,
     path,
-    relation,
-}: ResolveModelInput): ResolvedPrismaModel => {
+}: ResolveDataModelInput): ResolvedPrismaDataModel => {
     if (input !== undefined && !isRecord(input)) {
         throw createError({
             code: "AUTH_CONFIG_INVALID",
@@ -138,51 +147,37 @@ const resolveModel = ({
     }
 
     const config = isRecord(input) ? input : {};
+    const table =
+        config.table === undefined ? defaultTable : resolveTable({ input: config.table, path });
 
-    const name =
-        config.name === undefined
-            ? defaultName
-            : resolveName({ input: config.name, path: `${path}.name` });
-
-    const delegate = isRecord(client) ? client[name] : undefined;
-
-    if (!isPrismaDelegate(delegate)) {
-        throw createError({
-            code: "AUTH_CONFIG_INVALID",
-            message: `Prisma model ${name} is invalid.`,
-        });
-    }
-
-    if (config.relations !== undefined && !isRecord(config.relations)) {
-        throw createError({
-            code: "AUTH_CONFIG_INVALID",
-            message: `${path}.relations is invalid.`,
-        });
-    }
-
-    const relations = Object.fromEntries(
-        Object.entries(isRecord(config.relations) ? config.relations : {}).map(
-            ([relationName, relationConfig]) => [
-                relationName,
-                resolveModel({
-                    client,
-                    defaultName: relationName,
-                    defaultSelect: PRISMA_DEFAULTS.relation.select,
-                    input: relationConfig,
-                    path: `${path}.relations.${relationName}`,
-                    relation: relationName,
-                }),
-            ],
-        ),
-    );
+    requireDelegate({ client, table });
 
     return {
         access: resolveAccess({ input: config.access, path }),
-        name,
-        relation,
-        relations,
         select: resolveSelect({ defaultSelect, input: config.select, path }),
+        table,
     };
+};
+
+const resolveTableModel = ({
+    client,
+    defaultTable,
+    input,
+    path,
+}: Omit<ResolveDataModelInput, "defaultSelect">): string => {
+    if (input !== undefined && !isRecord(input)) {
+        throw createError({
+            code: "AUTH_CONFIG_INVALID",
+            message: `${path} model configuration is invalid.`,
+        });
+    }
+
+    const config = isRecord(input) ? input : {};
+    const table =
+        config.table === undefined ? defaultTable : resolveTable({ input: config.table, path });
+
+    requireDelegate({ client, table });
+    return table;
 };
 
 export const resolvePrismaModels = ({
@@ -201,28 +196,32 @@ export const resolvePrismaModels = ({
 
     const models = isRecord(input) ? input : {};
 
-    if (models.sessions !== undefined && !isRecord(models.sessions)) {
-        throw createError({
-            code: "AUTH_CONFIG_INVALID",
-            message: "Prisma sessions model configuration is invalid.",
-        });
-    }
-
-    const sessions = isRecord(models.sessions) ? models.sessions : {};
-    const sessionName =
-        sessions.name === undefined
-            ? PRISMA_DEFAULTS.sessions.name
-            : resolveName({ input: sessions.name, path: "models.sessions.name" });
-
     return {
-        account: resolveModel({
+        accounts: resolveDataModel({
             client,
-            defaultName: PRISMA_DEFAULTS.account.name,
-            defaultSelect: PRISMA_DEFAULTS.account.select,
-            input: models.account,
-            path: "models.account",
-            relation: "account",
+            defaultSelect: PRISMA_DEFAULTS.accounts.select,
+            defaultTable: PRISMA_DEFAULTS.accounts.table,
+            input: models.accounts,
+            path: "models.accounts",
         }),
-        sessions: sessionName,
+        sessions: resolveTableModel({
+            client,
+            defaultTable: PRISMA_DEFAULTS.sessions.table,
+            input: models.sessions,
+            path: "models.sessions",
+        }),
+        socials: resolveTableModel({
+            client,
+            defaultTable: PRISMA_DEFAULTS.socials.table,
+            input: models.socials,
+            path: "models.socials",
+        }),
+        users: resolveDataModel({
+            client,
+            defaultSelect: PRISMA_DEFAULTS.users.select,
+            defaultTable: PRISMA_DEFAULTS.users.table,
+            input: models.users,
+            path: "models.users",
+        }),
     };
 };
