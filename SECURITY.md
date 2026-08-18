@@ -49,6 +49,8 @@ Activity and possession of the session token cannot extend this absolute limit. 
 
 Configured providers use OAuth Authorization Code with PKCE `S256`. A cryptographically random state value and PKCE verifier are bound to a signed, HttpOnly transaction cookie that expires after 10 minutes. The package accepts only verified provider email addresses and stores only the normalized provider name and stable provider account ID.
 
+An existing provider link authenticates only when the provider's current verified email matches the linked account email after case-insensitive normalization. Email changes are rejected explicitly and never relinked automatically to another account.
+
 Provider access tokens, refresh tokens, and raw profiles are never persisted or exposed to registration callbacks. Success, error, callback, and optional registration URLs are fixed startup configuration; request parameters cannot select redirect targets.
 
 The consuming application must protect custom social registration endpoints with its normal CSRF, host, origin, rate-limit, and validation policies. `AUTH_SECRET` must remain server-only and contain at least 32 high-entropy bytes.

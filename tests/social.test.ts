@@ -321,6 +321,48 @@ describe("social navigation", () => {
 });
 
 describe("social service", () => {
+    it("rejects linked Google, GitHub, and X identities when the verified email changed", async () => {
+        for (const providerId of ["google", "github", "x"] as const) {
+            const verified = {
+                ...identity,
+                provider: providerId,
+                providerId: `${providerId}-1`,
+            };
+            const account = createAccount({ email: "linked@example.com" });
+            const harness = createSocialDb({ account });
+            harness.links.push({
+                account_id: account.id,
+                created_at: new Date(),
+                id: `${providerId}-link`,
+                provider: providerId,
+                provider_id: verified.providerId,
+            });
+            const service = createSocialService({ db: harness.db, registration: null });
+
+            await assert.rejects(
+                () => service.find(verified),
+                (error: unknown) =>
+                    isAuthError(error) && error.code === "SOCIAL_EMAIL_MISMATCH",
+            );
+            assert.equal(harness.links.length, 1);
+        }
+    });
+
+    it("matches linked provider emails without case sensitivity", async () => {
+        const account = createAccount({ email: "NEW@EXAMPLE.COM" });
+        const harness = createSocialDb({ account });
+        harness.links.push({
+            account_id: account.id,
+            created_at: new Date(),
+            id: "google-link",
+            provider: identity.provider,
+            provider_id: identity.providerId,
+        });
+        const service = createSocialService({ db: harness.db, registration: null });
+
+        assert.equal(await service.find(identity), account);
+    });
+
     it("links a verified provider identity to an existing email account", async () => {
         const harness = createSocialDb({
             account: createAccount({ email: identity.email }),
@@ -370,6 +412,30 @@ describe("social service", () => {
         });
 
         assert.equal(account.id, "account-custom");
+    });
+
+    it("rejects a custom registration account with a different email", async () => {
+        const harness = createSocialDb();
+        const service = createSocialService({
+            db: harness.db,
+            registration: {
+                createAccount: async () => {
+                    const account = createAccount({
+                        email: "different@example.com",
+                        id: "account-mismatch",
+                    });
+                    harness.setAccount(account);
+                    return { accountId: account.id };
+                },
+            },
+        });
+
+        await assert.rejects(
+            () => service.register({ data: undefined, identity }),
+            (error: unknown) =>
+                isAuthError(error) && error.code === "SOCIAL_EMAIL_MISMATCH",
+        );
+        assert.equal(harness.links.length, 0);
     });
 
     it("does not register when registration is disabled", async () => {
@@ -537,6 +603,44 @@ describe("Hono social adapter", () => {
         assert.equal(location.pathname, "/auth/login");
         assert.equal(location.searchParams.get("error"), "SOCIAL_ACCOUNT_NOT_FOUND");
         assert.equal(harness.links.length, 0);
+    });
+
+    it("redirects linked account email mismatches without creating a session", async () => {
+        const harness = createDb();
+        const account = createAccount({ email: "linked@example.com" });
+        harness.setAccount(account);
+        harness.links.push({
+            account_id: account.id,
+            created_at: new Date(),
+            id: "google-link",
+            provider: identity.provider,
+            provider_id: identity.providerId,
+        });
+        const auth = createHonoAuth({
+            cookie: { secure: false },
+            db: harness.db,
+            secret,
+            session: { validation: [] },
+            social: {
+                providers: [provider],
+            },
+        });
+        const app = new Hono();
+        app.get("/auth/social/:provider/:action", auth.social.handle, (c) => {
+            return c.redirect(c.get("social").returnTo);
+        });
+
+        const started = await beginSocial({ app, intent: "login" });
+        const response = await app.request(
+            `/auth/social/google/callback?code=valid-code&state=${started.state}`,
+            { headers: { cookie: started.cookie } },
+        );
+        const location = new URL(response.headers.get("location") ?? "", "https://app.example.com");
+
+        assert.equal(location.pathname, "/auth/login");
+        assert.equal(location.searchParams.get("error"), "SOCIAL_EMAIL_MISMATCH");
+        assert.ok(!getSetCookies(response).some((cookie) => cookie.startsWith("__ses=")));
+        assert.equal(harness.links.length, 1);
     });
 
     it("rejects weak secrets, Strict SameSite, and colliding cookie names", () => {

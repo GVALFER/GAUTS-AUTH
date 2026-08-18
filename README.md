@@ -946,6 +946,7 @@ app.post("/auth/register/social", async (c) => {
 - The temporary cookie is cleared after success or expected failure.
 - Only provider-verified email addresses are accepted.
 - Provider IDs, not email addresses, are the stable social link identifiers.
+- The current verified provider email must match the linked account email on every login.
 - Frontend navigation accepts local paths only. The paths are validated before OAuth, signed into the transaction, and restored only after state validation.
 - Social OAuth requires `SameSite=Lax` or `SameSite=None`; `Strict` fails during startup.
 
@@ -1093,6 +1094,7 @@ type AuthErrorCode =
     | "SOCIAL_ACCOUNT_INVALID"
     | "SOCIAL_ACCOUNT_NOT_FOUND"
     | "SOCIAL_EMAIL_INVALID"
+    | "SOCIAL_EMAIL_MISMATCH"
     | "SOCIAL_PROVIDER_ERROR"
     | "SOCIAL_REGISTRATION_INVALID"
     | "SOCIAL_STATE_INVALID"
@@ -1112,6 +1114,7 @@ Use `isAuthError(error)` before reading `error.code`.
 | `SOCIAL_ACCOUNT_INVALID`      |                 `403` | Linked account or owning user failed configured access rules.     |
 | `SOCIAL_ACCOUNT_NOT_FOUND`    |                 `401` | Provider identity is not linked and registration is unavailable.  |
 | `SOCIAL_EMAIL_INVALID`        |                 `400` | Provider did not return a verified usable email address.          |
+| `SOCIAL_EMAIL_MISMATCH`       |                 `409` | Verified provider email differs from the linked account email.    |
 | `SOCIAL_PROVIDER_ERROR`       |                 `401` | Provider denied or failed the OAuth exchange.                     |
 | `SOCIAL_REGISTRATION_INVALID` |                 `400` | Custom registration did not return a valid account ID.            |
 | `SOCIAL_STATE_INVALID`        |                 `400` | OAuth/registration state is missing, altered, or expired.         |

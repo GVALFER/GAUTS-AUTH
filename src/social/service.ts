@@ -30,6 +30,11 @@ type CreateSocial = {
     identity: SocialIdentity;
 };
 
+type RequireEmailMatchInput<TAccount extends AuthAccount> = {
+    account: TAccount;
+    identity: SocialIdentity;
+};
+
 const requireAccount = <TAccount extends AuthAccount>(
     value: SocialAccountRecord<TAccount> | null,
 ): TAccount => {
@@ -41,6 +46,23 @@ const requireAccount = <TAccount extends AuthAccount>(
     }
 
     return value.account;
+};
+
+const requireEmailMatch = <TAccount extends AuthAccount>({
+    account,
+    identity,
+}: RequireEmailMatchInput<TAccount>): TAccount => {
+    const accountEmail = account.email.trim().toLowerCase();
+    const providerEmail = identity.email.trim().toLowerCase();
+
+    if (accountEmail !== providerEmail) {
+        throw createError({
+            code: "SOCIAL_EMAIL_MISMATCH",
+            message: "Social provider email does not match the linked account email.",
+        });
+    }
+
+    return account;
 };
 
 export const createSocialService = <TAccount extends AuthAccount, TData>({
@@ -86,7 +108,10 @@ export const createSocialService = <TAccount extends AuthAccount, TData>({
             );
 
             if (linked) {
-                return requireAccount(linked);
+                return requireEmailMatch({
+                    account: requireAccount(linked),
+                    identity,
+                });
             }
 
             const emailAccount = await runDb(() => db.findEmail(identity.email));
@@ -95,7 +120,11 @@ export const createSocialService = <TAccount extends AuthAccount, TData>({
                 return null;
             }
 
-            const account = requireAccount(emailAccount);
+            const account = requireEmailMatch({
+                account: requireAccount(emailAccount),
+                identity,
+            });
+
             await createSocial({ account_id: account.id, identity });
             return account;
         },
@@ -123,7 +152,11 @@ export const createSocialService = <TAccount extends AuthAccount, TData>({
                 });
             }
 
-            const account = requireAccount(await runDb(() => db.findAccount(result.accountId)));
+            const created = await runDb(() => db.findAccount(result.accountId));
+            const account = requireEmailMatch({
+                account: requireAccount(created),
+                identity,
+            });
 
             await createSocial({ account_id: account.id, identity });
             return account;
