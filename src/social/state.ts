@@ -1,8 +1,7 @@
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
-
 import { createError } from "../errors.js";
 import { isRecord } from "../session/guards.js";
-import type { SocialIdentity, SocialIntent, SocialProviderId } from "./types.js";
+import type { SocialIdentity, SocialIntent, SocialNavigation, SocialProviderId } from "./types.js";
 
 type OAuthPayload = {
     exp: number;
@@ -11,16 +10,17 @@ type OAuthPayload = {
     provider: SocialProviderId;
     state: string;
     verifier: string;
-};
+} & SocialNavigation;
 
 type RegistrationPayload = {
     exp: number;
     identity: SocialIdentity;
     kind: "registration";
-};
+} & SocialNavigation;
 
 type CreateOAuthStateInput = {
     intent: SocialIntent;
+    navigation: SocialNavigation;
     now?: () => Date;
     provider: SocialProviderId;
     secret: string;
@@ -36,6 +36,7 @@ type ResolveOAuthStateInput = {
 
 type CreateRegistrationStateInput = {
     identity: SocialIdentity;
+    navigation: SocialNavigation;
     now?: () => Date;
     secret: string;
 };
@@ -113,6 +114,15 @@ const isIntent = (value: unknown): value is SocialIntent => {
     return value === "login" || value === "register";
 };
 
+const isNavigation = (value: unknown): value is SocialNavigation => {
+    return (
+        isRecord(value) &&
+        typeof value.errorTo === "string" &&
+        (typeof value.registerTo === "string" || value.registerTo === null) &&
+        typeof value.returnTo === "string"
+    );
+};
+
 const isIdentity = (value: unknown): value is SocialIdentity => {
     return (
         isRecord(value) &&
@@ -136,7 +146,8 @@ const isOAuthPayload = (value: unknown): value is OAuthPayload => {
         typeof value.state === "string" &&
         tokenPattern.test(value.state) &&
         typeof value.verifier === "string" &&
-        tokenPattern.test(value.verifier)
+        tokenPattern.test(value.verifier) &&
+        isNavigation(value)
     );
 };
 
@@ -146,7 +157,8 @@ const isRegistrationPayload = (value: unknown): value is RegistrationPayload => 
         typeof value.exp === "number" &&
         Number.isSafeInteger(value.exp) &&
         value.kind === "registration" &&
-        isIdentity(value.identity)
+        isIdentity(value.identity) &&
+        isNavigation(value)
     );
 };
 
@@ -158,6 +170,7 @@ const matchesState = ({ expected, received }: { expected: string; received: stri
 
 export const createOAuthState = ({
     intent,
+    navigation,
     now = () => new Date(),
     provider,
     secret,
@@ -175,6 +188,7 @@ export const createOAuthState = ({
         exp: expires_at.getTime(),
         intent,
         kind: "oauth",
+        ...navigation,
         provider,
         state,
         verifier,
@@ -194,7 +208,10 @@ export const resolveOAuthState = ({
     secret,
     state,
     value,
-}: ResolveOAuthStateInput): Pick<OAuthPayload, "intent" | "verifier"> | null => {
+}: ResolveOAuthStateInput): Pick<
+    OAuthPayload,
+    "errorTo" | "intent" | "registerTo" | "returnTo" | "verifier"
+> | null => {
     validateSocialSecret(secret);
 
     if (!state || !tokenPattern.test(state)) {
@@ -212,11 +229,18 @@ export const resolveOAuthState = ({
         return null;
     }
 
-    return { intent: payload.intent, verifier: payload.verifier };
+    return {
+        errorTo: payload.errorTo,
+        intent: payload.intent,
+        registerTo: payload.registerTo,
+        returnTo: payload.returnTo,
+        verifier: payload.verifier,
+    };
 };
 
 export const createRegistrationState = ({
     identity,
+    navigation,
     now = () => new Date(),
     secret,
 }: CreateRegistrationStateInput): StoredState<object> => {
@@ -227,6 +251,7 @@ export const createRegistrationState = ({
         exp: expires_at.getTime(),
         identity,
         kind: "registration",
+        ...navigation,
     };
 
     return {
@@ -239,11 +264,21 @@ export const resolveRegistrationState = ({
     now = () => new Date(),
     secret,
     value,
-}: ResolveRegistrationStateInput): SocialIdentity | null => {
+}: ResolveRegistrationStateInput): {
+    identity: SocialIdentity;
+    navigation: SocialNavigation;
+} | null => {
     validateSocialSecret(secret);
     const payload = parsePayload({ secret, value });
 
     return isRegistrationPayload(payload) && payload.exp > now().getTime()
-        ? payload.identity
+        ? {
+              identity: payload.identity,
+              navigation: {
+                  errorTo: payload.errorTo,
+                  registerTo: payload.registerTo,
+                  returnTo: payload.returnTo,
+              },
+          }
         : null;
 };

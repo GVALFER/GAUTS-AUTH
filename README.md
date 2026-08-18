@@ -36,20 +36,25 @@ Database-backed password authentication, opaque browser sessions, and optional s
 
 ## Quick start
 
-The application defines its credential login, renewal, logout, protected endpoints, and social route paths. Optional social authentication exposes the Hono handler used inside the application-owned route.
+The application defines its credential login, renewal, logout, and protected endpoints. Optional addons are configured separately after this base setup.
 
 ### 1. Install the package
 
+Run these commands inside the Hono API project:
+
 ```bash
 npm install @gauts/auth
+npm install hono @prisma/client
 ```
 
-Install the peer dependencies used by each application if they are not already present:
+When the Next.js frontend is a separate project, run these commands inside the frontend project:
 
 ```bash
-npm install hono @prisma/client
+npm install @gauts/auth
 npm install next
 ```
+
+`hono`, `@prisma/client`, and `next` only need to be installed when the corresponding project does not already provide them. The API imports `@gauts/auth/hono` and `@gauts/auth/prisma`; the frontend imports `@gauts/auth/next`.
 
 ### 2. Add the Prisma schema
 
@@ -58,11 +63,10 @@ The default adapter uses this fixed relationship tree:
 ```text
 users
 └── user_accounts
-    ├── account_sessions
-    └── social_accounts (optional)
+    └── account_sessions
 ```
 
-Add the three required models to the API schema. `password_hash` may be nullable when the same account model also supports social authentication.
+Add the three required models to the API schema. Social authentication is an optional addon with its own schema instructions later in this README.
 
 ```prisma
 model users {
@@ -102,30 +106,6 @@ model account_sessions {
   @@index([account_id])
   @@index([expires_at])
   @@index([revoked_at])
-}
-```
-
-When social authentication is enabled, add this relation inside `user_accounts`:
-
-```prisma
-socials social_accounts[]
-```
-
-Then add the optional model:
-
-```prisma
-model social_accounts {
-  id          String   @id @default(uuid()) @db.VarChar(255)
-  account_id  String   @db.VarChar(255)
-  provider    String   @db.VarChar(32)
-  provider_id String   @db.VarChar(255)
-  created_at  DateTime @default(now()) @db.Timestamp(0)
-
-  account user_accounts @relation(fields: [account_id], references: [id], onDelete: Cascade)
-
-  @@unique([provider, provider_id])
-  @@unique([account_id, provider])
-  @@index([account_id])
 }
 ```
 
@@ -188,7 +168,7 @@ app.post("/auth/login", async (c) => {
 
     const passwordValid = await auth.password.verify({
         password: body.password,
-        storedHash: account?.passwordHash,
+        storedHash: account?.password_hash,
     });
 
     if (!account || !passwordValid) {
@@ -465,22 +445,20 @@ The cache is signed but not encrypted. Do not place passwords, password hashes, 
 
 ### Prisma adapter
 
-The Prisma adapter uses one fixed, predictable session relationship tree and one optional social relation:
+The Prisma adapter uses one fixed, predictable session relationship tree:
 
 ```text
 users
 └── user_accounts
-    ├── account_sessions
-    └── social_accounts (optional)
+    └── account_sessions
 ```
 
-The required default delegate names are `prisma.users`, `prisma.user_accounts`, and `prisma.account_sessions`. When `prisma.social_accounts` exists, the adapter adds social persistence automatically. The fixed Prisma relation fields are:
+The required default delegate names are `prisma.users`, `prisma.user_accounts`, and `prisma.account_sessions`. The fixed Prisma relation fields are:
 
 - `user_accounts.user`;
 - `account_sessions.account`;
-- `social_accounts.account` when social persistence is present.
 
-There is no relation mapping configuration. Applications may rename delegates with `table`, add payload fields with `select`, and define access conditions with `access`. Omitting the social model removes the social methods from the adapter without affecting password or session authentication.
+There is no relation mapping configuration. Applications may rename delegates with `table`, add payload fields with `select`, and define access conditions with `access`.
 
 #### Default models
 
@@ -545,10 +523,6 @@ const db = createPrismaAdapter({
         sessions: {
             table: "admin_sessions",
         },
-        // Only when social authentication is enabled.
-        socials: {
-            table: "admin_social_accounts",
-        },
         users: {
             table: "admin_users",
             select: ["role", "status"],
@@ -567,7 +541,6 @@ const db = createPrismaAdapter({
 | `models.accounts.select` | Unique scalar field array               |    ❌    | `[]`                 | Adds payload fields; `id` and `email` are always included. |
 | `models.accounts.access` | Scalar equality or allowed-value arrays |    ❌    | `{}`                 | Conditions required on the authenticating account.         |
 | `models.sessions.table`  | Compatible session delegate name        |    ❌    | `"account_sessions"` | Overrides authoritative session persistence.               |
-| `models.socials.table`   | Compatible social delegate name         |    ❌    | `"social_accounts"`  | Overrides optional provider association persistence.       |
 
 `select` accepts JSON-safe scalar fields and receives autocomplete from the generated Prisma client. `password`, `hash`, `password_hash`, and `passwordHash` are rejected by both TypeScript and runtime validation. Never select tokens or other secrets because the optional cache is signed, not encrypted.
 
@@ -718,9 +691,63 @@ await auth.createSession({
 
 ## Social authentication
 
-Social authentication is disabled unless `social` is configured. Import providers separately so applications only include the providers they use:
+Social authentication is an optional addon and remains disabled unless `social` is configured. Complete these steps only in applications that need Google, GitHub, or X authentication.
 
-Social authentication requires the optional `social_accounts` model documented in the schema setup. Without that model, `createPrismaAdapter()` remains a session-only adapter and configuring `social` fails during application startup.
+### 1. Add the social Prisma schema
+
+Add the social relation inside the existing `user_accounts` model in the API schema:
+
+```prisma
+model user_accounts {
+  // Existing fields and relations...
+
+  socials social_accounts[]
+}
+```
+
+Then add the provider association model:
+
+```prisma
+model social_accounts {
+  id          String   @id @default(uuid()) @db.VarChar(255)
+  account_id  String   @db.VarChar(255)
+  provider    String   @db.VarChar(32)
+  provider_id String   @db.VarChar(255)
+  created_at  DateTime @default(now()) @db.Timestamp(0)
+
+  account user_accounts @relation(fields: [account_id], references: [id], onDelete: Cascade)
+
+  @@unique([provider, provider_id])
+  @@unique([account_id, provider])
+  @@index([account_id])
+}
+```
+
+Run the social migration from the API project, then regenerate its Prisma client:
+
+```bash
+npx prisma migrate dev --name add_social_auth
+npx prisma generate
+```
+
+Without this model, `createPrismaAdapter()` remains a session-only adapter. Configuring `social` without social database capabilities fails during application startup.
+
+The default Prisma delegate is `prisma.social_accounts` and its relation to `user_accounts` must be named `account`. Configure a different compatible delegate only when the application uses another model name:
+
+```ts
+const db = createPrismaAdapter({
+    client: prisma,
+    models: {
+        socials: {
+            table: "admin_social_accounts",
+        },
+    },
+});
+```
+
+### 2. Configure the providers
+
+Import only the providers used by the API:
 
 ```ts
 import { createHonoAuth } from "@gauts/auth/hono";
@@ -731,7 +758,6 @@ export const auth = createHonoAuth({
     db: createPrismaAdapter({ client: prisma }),
     secret: requiredEnv("AUTH_SECRET"),
     social: {
-        errorUrl: "https://app.example.com/auth/login",
         providers: [
             google({
                 callbackUrl: "https://app.example.com/proxy/auth/social/google/callback",
@@ -749,46 +775,68 @@ export const auth = createHonoAuth({
                 clientSecret: requiredEnv("X_CLIENT_SECRET"),
             }),
         ],
-        successUrl: "https://app.example.com/dashboard",
     },
 });
 ```
 
-Declare one application route for every configured provider and supported action:
+Register every `callbackUrl` shown above in the corresponding provider dashboard.
+
+### 3. Add the API route and frontend start
+
+Declare one dynamic API route covering every configured provider. `social.handle` is Hono middleware: it completes `start` and expected error responses itself, then calls the application handler only after a successful callback.
 
 ```ts
-app.get("/auth/social/:provider/:action", async (c) => {
-    return auth.social.handle(c);
+app.get("/auth/social/:provider/:action", auth.social.handle, async (c) => {
+    const social = c.get("social");
+
+    await auth.createSession({
+        account_id: social.account.id,
+        context: c,
+    });
+
+    // Application notifications, audit logs, or other login work.
+
+    return c.redirect(social.returnTo);
 });
 ```
 
-The same route handles the explicit `start` and `callback` paths:
+The frontend starts authentication with local navigation paths:
 
 ```text
-GET /proxy/auth/social/google/start?intent=login
-GET /proxy/auth/social/google/start?intent=register
+GET /proxy/auth/social/google/start?intent=login&returnTo=/dashboard&errorTo=/auth/login
+GET /proxy/auth/social/google/start?intent=register&returnTo=/dashboard&errorTo=/auth/login
 GET /proxy/auth/social/google/callback
-GET /proxy/auth/social/github/start?intent=login
+GET /proxy/auth/social/github/start?intent=login&returnTo=/dashboard&errorTo=/auth/login
 GET /proxy/auth/social/github/callback
-GET /proxy/auth/social/x/start?intent=login
+GET /proxy/auth/social/x/start?intent=login&returnTo=/dashboard&errorTo=/auth/login
 GET /proxy/auth/social/x/callback
 ```
 
-`intent` defaults to `login`. Only `start` and `callback` are accepted as actions. The public `/proxy` path in this example is expected to forward to the Hono `/auth` path. Provider callback URLs must exactly match the public callback paths registered with each provider.
+`intent` defaults to `login`. `returnTo` and `errorTo` are required local paths supplied by the frontend. `registerTo` is required only when registration continues in an application form. The package rejects external URLs, signs these paths into the OAuth transaction, and never trusts callback query parameters for navigation.
 
-The package does not create or mount routes. Applications may wrap `auth.social.handle(c)` with their own logging, metrics, rate limiting, or other route-level behavior.
+Only `start` and `callback` are accepted as actions. The public `/proxy` path in this example forwards to the Hono `/auth` path. Provider callback URLs must exactly match the public callback paths registered with each provider.
+
+On an authenticated callback the middleware exposes:
+
+```ts
+const social = c.get("social");
+
+social.account;
+social.identity;
+social.registered;
+social.returnTo;
+```
+
+The package does not create the application route, session, notifications, logs, or final success response. Those remain explicit in the route handler.
 
 ### Social configuration
 
 | Property                     | Type / allowed values                |  Required   | Default   | Description                                                                |
 | ---------------------------- | ------------------------------------ | :---------: | --------- | -------------------------------------------------------------------------- |
 | `social.providers`           | `SocialProvider[]`                   |     ✅      | —         | Configured Google, GitHub, or X providers.                                 |
-| `social.successUrl`          | Absolute HTTP(S) URL                 |     ✅      | —         | Fixed redirect after session creation.                                     |
-| `social.errorUrl`            | Absolute HTTP(S) URL                 |     ✅      | —         | Fixed redirect for expected provider/authentication failures.              |
 | `social.cookieName`          | Valid cookie name                    |     ❌      | `"__soc"` | Signed temporary OAuth/registration transaction cookie.                    |
 | `social.registration`        | `SocialRegistrationConfig`           |     ❌      | Disabled  | Enables default or application-specific social registration.               |
-| `registration.registerUrl`   | Absolute HTTP(S) URL                 |     ❌      | Direct    | Defers account creation to an application form.                            |
-| `registration.createAccount` | Async callback returning `accountId` | Conditional | Built-in  | Creates required business data when the default structure is insufficient. |
+| `registration.createAccount` | Async callback returning `accountId` |     ❌      | Built-in  | Creates required business data when the default structure is insufficient. |
 
 Provider configuration:
 
@@ -819,26 +867,22 @@ Login only (default):
 
 ```ts
 social: {
-    errorUrl,
     providers: [googleProvider],
-    successUrl,
 }
 ```
 
-Default registration creates `users { id, name }`, `user_accounts { id, email, user_id }`, the provider link, and the session:
+Default registration creates `users { id, name }`, `user_accounts { id, email, user_id }`, and the provider link. The application route creates the session after the middleware succeeds:
 
 ```ts
 social: {
-    errorUrl,
     providers: [googleProvider],
     registration: {},
-    successUrl,
 }
 ```
 
 This requires every additional application column on `users` and `user_accounts` to be nullable or have a database default.
 
-For additional required form data, configure a registration URL and callback:
+For additional required form data, configure the account callback:
 
 ```ts
 import type { SocialRegistrationInput } from "@gauts/auth";
@@ -848,10 +892,8 @@ type RegisterData = {
 };
 
 social: {
-    errorUrl,
     providers: [googleProvider],
     registration: {
-        registerUrl: "https://app.example.com/auth/register/social",
         createAccount: async ({ data, identity }: SocialRegistrationInput<RegisterData>) => {
             const account = await createApplicationAccount({
                 companyNumber: data.companyNumber,
@@ -862,11 +904,16 @@ social: {
             return { accountId: account.id };
         },
     },
-    successUrl,
 }
 ```
 
-The application endpoint reads the verified identity and completes registration:
+The frontend includes `registerTo` when it starts OAuth:
+
+```text
+/proxy/auth/social/google/start?intent=register&returnTo=/dashboard&errorTo=/auth/login&registerTo=/auth/register/social
+```
+
+The application endpoints read the verified identity and complete registration:
 
 ```ts
 app.get("/auth/register/social", (c) => {
@@ -876,25 +923,30 @@ app.get("/auth/register/social", (c) => {
 app.post("/auth/register/social", async (c) => {
     const data = await c.req.json<{ companyNumber: string }>();
 
-    await auth.social.completeRegistration({
+    const social = await auth.social.completeRegistration({
         context: c,
         data,
     });
 
-    return c.json({ registered: true });
+    await auth.createSession({
+        account_id: social.account.id,
+        context: c,
+    });
+
+    return c.json({ registered: true, returnTo: social.returnTo });
 });
 ```
 
-`registerUrl` requires `createAccount`; otherwise submitted application data would have no owner. `createAccount` must create the fixed `users`/`user_accounts` relation and return the created account ID. The package then creates `social_accounts` and the authenticated session.
+`registerTo` requires `createAccount`; otherwise submitted application data would have no owner. `createAccount` must create the fixed `users`/`user_accounts` relation and return the created account ID. The package then creates `social_accounts`; the application explicitly creates the authenticated session.
 
 ### OAuth security
 
 - Authorization Code flow with PKCE `S256` is used for every provider.
-- State and the PKCE verifier live in the signed, HttpOnly `__soc` cookie for at most 10 minutes.
+- State, PKCE verifier, intent, and local navigation paths live in the signed, HttpOnly `__soc` cookie for at most 10 minutes.
 - The temporary cookie is cleared after success or expected failure.
 - Only provider-verified email addresses are accepted.
 - Provider IDs, not email addresses, are the stable social link identifiers.
-- Redirect URLs come only from startup configuration; request query parameters cannot choose them.
+- Frontend navigation accepts local paths only. The paths are validated before OAuth, signed into the transaction, and restored only after state validation.
 - Social OAuth requires `SameSite=Lax` or `SameSite=None`; `Strict` fails during startup.
 
 ### Core and adapter composition

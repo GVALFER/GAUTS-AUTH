@@ -115,20 +115,11 @@ export const resolveSocialConfig = <TData>(
         });
     }
 
-    if (registration?.registerUrl !== undefined && !registration.createAccount) {
-        throw createError({
-            code: "AUTH_CONFIG_INVALID",
-            message:
-                "social.registration.createAccount is required when registerUrl is configured.",
-        });
-    }
-
     return {
         cookieName:
             config.cookieName === undefined
                 ? SOCIAL_DEFAULTS.cookieName
                 : resolveCookieName({ input: config.cookieName, label: "Social" }),
-        errorUrl: requireUrl({ name: "social.errorUrl", value: config.errorUrl }),
         providers: resolveProviders(config.providers),
         registration:
             registration === null
@@ -137,15 +128,6 @@ export const resolveSocialConfig = <TData>(
                       ...(registration.createAccount
                           ? { createAccount: registration.createAccount }
                           : {}),
-                      ...(registration.registerUrl
-                          ? {
-                                registerUrl: requireUrl({
-                                    name: "social.registration.registerUrl",
-                                    value: registration.registerUrl,
-                                }),
-                            }
-                          : {}),
                   },
-        successUrl: requireUrl({ name: "social.successUrl", value: config.successUrl }),
     };
 };

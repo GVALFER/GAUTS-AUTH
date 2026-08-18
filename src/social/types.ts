@@ -67,21 +67,29 @@ export type SocialRegistrationConfig<TData = undefined> = {
     createAccount?: (
         input: SocialRegistrationInput<TData>,
     ) => Promise<SocialRegistrationResult>;
-    registerUrl?: string;
 };
 
 export type SocialConfig<TData = undefined> = {
     cookieName?: string;
-    errorUrl: string;
     providers: readonly SocialProvider[];
     registration?: SocialRegistrationConfig<TData>;
-    successUrl: string;
 };
 
 export type ResolvedSocialConfig<TData = undefined> = {
     cookieName: string;
-    errorUrl: string;
     providers: ReadonlyMap<SocialProviderId, SocialProvider>;
     registration: SocialRegistrationConfig<TData> | null;
-    successUrl: string;
+};
+
+export type SocialNavigation = {
+    errorTo: string;
+    registerTo: string | null;
+    returnTo: string;
+};
+
+export type SocialAuthenticated<TAccount extends AuthAccount = AuthAccount> = {
+    account: TAccount;
+    identity: SocialIdentity;
+    registered: boolean;
+    returnTo: string;
 };

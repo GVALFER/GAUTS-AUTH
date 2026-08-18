@@ -5,6 +5,7 @@ import { Hono } from "hono";
 
 import { createHonoAuth } from "../src/adapters/hono/index.js";
 import { isAuthError } from "../src/errors.js";
+import { resolveSocialNavigation } from "../src/social/navigation.js";
 import { createSocialService } from "../src/social/service.js";
 import {
     createOAuthState,
@@ -27,6 +28,11 @@ import type {
 } from "../src/session/types.js";
 
 const secret = "s".repeat(32);
+const navigation = {
+    errorTo: "/auth/login",
+    registerTo: null,
+    returnTo: "/dashboard",
+};
 const identity: SocialIdentity = {
     avatarUrl: "https://images.example/avatar.png",
     email: "new@example.com",
@@ -170,8 +176,22 @@ const getCookie = ({ name, response }: { name: string; response: Response }): st
     return value.split(";", 1)[0] ?? "";
 };
 
-const beginSocial = async ({ app, intent }: { app: Hono; intent: string }) => {
-    const response = await app.request(`/auth/social/google/start?intent=${intent}`);
+const beginSocial = async ({
+    app,
+    intent,
+    registerTo,
+}: {
+    app: Hono;
+    intent: string;
+    registerTo?: string;
+}) => {
+    const query = new URLSearchParams({
+        errorTo: navigation.errorTo,
+        intent,
+        returnTo: navigation.returnTo,
+        ...(registerTo ? { registerTo } : {}),
+    });
+    const response = await app.request(`/auth/social/google/start?${query.toString()}`);
     const location = response.headers.get("location");
     assert.equal(response.status, 302);
     assert.ok(location);
@@ -190,6 +210,7 @@ describe("social state", () => {
         const now = new Date("2026-08-18T10:00:00.000Z");
         const created = createOAuthState({
             intent: "register",
+            navigation,
             now: () => now,
             provider: "google",
             secret,
@@ -204,6 +225,8 @@ describe("social state", () => {
 
         assert.equal(created.expires_at.toISOString(), "2026-08-18T10:10:00.000Z");
         assert.equal(resolved?.intent, "register");
+        assert.equal(resolved?.errorTo, navigation.errorTo);
+        assert.equal(resolved?.returnTo, navigation.returnTo);
         assert.match(resolved?.verifier ?? "", /^[A-Za-z0-9_-]{43}$/);
         assert.match(created.codeChallenge, /^[A-Za-z0-9_-]{43}$/);
     });
@@ -211,6 +234,7 @@ describe("social state", () => {
     it("rejects altered, mismatched, and expired OAuth state", () => {
         const created = createOAuthState({
             intent: "login",
+            navigation,
             now: () => new Date("2026-08-18T10:00:00.000Z"),
             provider: "google",
             secret,
@@ -238,6 +262,7 @@ describe("social state", () => {
     it("signs and expires a pending registration identity", () => {
         const created = createRegistrationState({
             identity,
+            navigation,
             now: () => new Date("2026-08-18T10:00:00.000Z"),
             secret,
         });
@@ -248,7 +273,7 @@ describe("social state", () => {
                 secret,
                 value: created.value,
             }),
-            identity,
+            { identity, navigation },
         );
         assert.equal(
             resolveRegistrationState({
@@ -258,6 +283,40 @@ describe("social state", () => {
             }),
             null,
         );
+    });
+});
+
+describe("social navigation", () => {
+    it("accepts only local frontend paths", () => {
+        assert.deepEqual(
+            resolveSocialNavigation({
+                errorTo: "/auth/login?next=%2Fbilling",
+                registerTo: "/auth/register/social",
+                returnTo: "/billing",
+            }),
+            {
+                errorTo: "/auth/login?next=%2Fbilling",
+                registerTo: "/auth/register/social",
+                returnTo: "/billing",
+            },
+        );
+
+        for (const returnTo of [
+            "https://evil.example.com",
+            "//evil.example.com",
+            "/\\evil.example.com",
+        ]) {
+            assert.throws(
+                () =>
+                    resolveSocialNavigation({
+                        errorTo: "/auth/login",
+                        registerTo: undefined,
+                        returnTo,
+                    }),
+                (error: unknown) =>
+                    isAuthError(error) && error.code === "SOCIAL_STATE_INVALID",
+            );
+        }
     });
 });
 
@@ -334,9 +393,7 @@ describe("Hono social adapter", () => {
             secret,
             session: { validation: [] },
             social: {
-                errorUrl: "https://app.example.com/auth/login",
                 providers: [provider],
-                successUrl: "https://app.example.com/dashboard",
             },
         });
         const app = new Hono();
@@ -356,14 +413,16 @@ describe("Hono social adapter", () => {
             secret,
             session: { validation: [] },
             social: {
-                errorUrl: "https://app.example.com/auth/login",
                 providers: [provider],
                 registration: {},
-                successUrl: "https://app.example.com/dashboard",
             },
         });
         const app = new Hono();
-        app.get("/auth/social/:provider/:action", auth.social.handle);
+        app.get("/auth/social/:provider/:action", auth.social.handle, async (c) => {
+            const social = c.get("social");
+            await auth.createSession({ account_id: social.account.id, context: c });
+            return c.redirect(social.returnTo);
+        });
 
         const started = await beginSocial({ app, intent: "register" });
         const response = await app.request(
@@ -372,7 +431,7 @@ describe("Hono social adapter", () => {
         );
 
         assert.equal(response.status, 302);
-        assert.equal(response.headers.get("location"), "https://app.example.com/dashboard");
+        assert.equal(response.headers.get("location"), navigation.returnTo);
         assert.ok(getSetCookies(response).some((cookie) => cookie.startsWith("__ses=")));
         assert.ok(
             getSetCookies(response).some(
@@ -391,7 +450,6 @@ describe("Hono social adapter", () => {
             secret,
             session: { validation: [] },
             social: {
-                errorUrl: "https://app.example.com/auth/login",
                 providers: [provider],
                 registration: {
                     createAccount: async ({ data, identity: verified }) => {
@@ -405,28 +463,33 @@ describe("Hono social adapter", () => {
                         harness.setAccount(account);
                         return { accountId: account.id };
                     },
-                    registerUrl: "https://app.example.com/auth/register/social",
                 },
-                successUrl: "https://app.example.com/dashboard",
             },
         });
         const app = new Hono();
-        app.get("/auth/social/:provider/:action", auth.social.handle);
+        app.get("/auth/social/:provider/:action", auth.social.handle, (c) => {
+            return c.redirect(c.get("social").returnTo);
+        });
         app.get("/auth/register/social", (c) => c.json(auth.social.getRegistration(c)));
         app.post("/auth/register/social", async (c) => {
             const data = await c.req.json<{ companyNumber: string }>();
-            await auth.social.completeRegistration({ context: c, data });
+            const social = await auth.social.completeRegistration({ context: c, data });
+            await auth.createSession({ account_id: social.account.id, context: c });
             return c.json({ registered: true });
         });
 
-        const started = await beginSocial({ app, intent: "register" });
+        const started = await beginSocial({
+            app,
+            intent: "register",
+            registerTo: "/auth/register/social",
+        });
         const callback = await app.request(
             `/auth/social/google/callback?code=valid-code&state=${started.state}`,
             { headers: { cookie: started.cookie } },
         );
         const pendingCookie = getCookie({ name: "__soc", response: callback });
 
-        assert.equal(callback.headers.get("location"), "https://app.example.com/auth/register/social");
+        assert.equal(callback.headers.get("location"), "/auth/register/social");
         assert.equal(createCalls, 0);
 
         const pending = await app.request("/auth/register/social", {
@@ -456,20 +519,20 @@ describe("Hono social adapter", () => {
             secret,
             session: { validation: [] },
             social: {
-                errorUrl: "https://app.example.com/auth/login",
                 providers: [provider],
-                successUrl: "https://app.example.com/dashboard",
             },
         });
         const app = new Hono();
-        app.get("/auth/social/:provider/:action", auth.social.handle);
+        app.get("/auth/social/:provider/:action", auth.social.handle, (c) => {
+            return c.redirect(c.get("social").returnTo);
+        });
 
         const started = await beginSocial({ app, intent: "login" });
         const response = await app.request(
             `/auth/social/google/callback?code=valid-code&state=${started.state}`,
             { headers: { cookie: started.cookie } },
         );
-        const location = new URL(response.headers.get("location") ?? "");
+        const location = new URL(response.headers.get("location") ?? "", "https://app.example.com");
 
         assert.equal(location.pathname, "/auth/login");
         assert.equal(location.searchParams.get("error"), "SOCIAL_ACCOUNT_NOT_FOUND");
@@ -482,9 +545,7 @@ describe("Hono social adapter", () => {
             db: harness.db,
             session: { validation: [] as const },
             social: {
-                errorUrl: "https://app.example.com/auth/login",
                 providers: [provider],
-                successUrl: "https://app.example.com/dashboard",
             },
         };
 
@@ -531,9 +592,7 @@ describe("Hono social adapter", () => {
                     secret,
                     session: { validation: [] },
                     social: {
-                        errorUrl: "https://app.example.com/auth/login",
                         providers: [provider],
-                        successUrl: "https://app.example.com/dashboard",
                     },
                 } as never),
             (error: unknown) => isAuthError(error) && error.code === "AUTH_CONFIG_INVALID",

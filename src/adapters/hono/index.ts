@@ -11,15 +11,15 @@ import {
 import type { AuthAccount, DbAdapter, ResolvedSession, Session } from "../../session/types.js";
 import type { SocialConfig, SocialDbAdapter } from "../../social/types.js";
 import { createHonoSocial, type HonoSocial } from "./social.js";
-
-export type { SessionCacheConfig } from "../../session/cache.js";
-export type { HonoSocial } from "./social.js";
 import {
     formatRenewAt,
     parseSessionToken,
     resolveSessionCookieNames,
     type SessionCookieNames,
 } from "../../session/cookie.js";
+
+export type { SessionCacheConfig } from "../../session/cache.js";
+export type { HonoSocial, HonoSocialEnv, HonoSocialVariables } from "./social.js";
 
 export type HonoAuthVariables<TAccount extends AuthAccount = AuthAccount> = {
     account: TAccount;
@@ -129,7 +129,7 @@ export type HonoSocialAuth<
     TData = undefined,
 > = Auth<TAccount> &
     HonoAdapter<TAccount> & {
-        social: HonoSocial<TData>;
+        social: HonoSocial<TAccount, TData>;
     };
 
 type ResolveDbSessionInput = {
@@ -494,7 +494,6 @@ const createHonoAuthImpl = <TAccount extends AuthAccount, TData = undefined>({
         social: createHonoSocial({
             config: social,
             cookie: resolvedCookie.options,
-            createSession: (input) => adapter.createSession(input),
             db: socialDb as DbAdapter<TAccount> & SocialDbAdapter<TAccount>,
             sessionCookieNames: Object.values(resolvedCookie.names),
             secret,
