@@ -175,10 +175,9 @@ describe("Next adapter", () => {
                 renewUrl: "https://api.example.com/auth/renew",
             });
             const result = await auth.renew({
-                onUnauthorized: () =>
-                    NextResponse.redirect("https://admin.example.com/auth/login"),
                 request: createRequest({ renewAt: null }),
                 response: NextResponse.next(),
+                unauthorizedUrl: "/auth/login",
             });
 
             assert.equal(result.attempted, true);
@@ -305,10 +304,9 @@ describe("Next adapter", () => {
             renewUrl: "https://api.example.com/auth/renew",
         });
         const missing = await auth.renew({
-            onUnauthorized: () =>
-                NextResponse.redirect("https://admin.example.com/auth/login"),
             request: new NextRequest("https://admin.example.com/account"),
             response: NextResponse.next(),
+            unauthorizedUrl: "/auth/login",
         });
         const malformed = await auth.renew({
             request: new NextRequest("https://admin.example.com/account", {

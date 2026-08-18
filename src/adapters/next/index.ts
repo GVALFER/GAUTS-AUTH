@@ -1,4 +1,4 @@
-import type { NextRequest, NextResponse } from "next/server.js";
+import { NextResponse, type NextRequest } from "next/server.js";
 
 import { createError } from "../../errors.js";
 import {
@@ -17,12 +17,10 @@ export type NextAuthConfig = {
     renewUrl: string;
 };
 
-export type NextUnauthorized = () => NextResponse;
-
 export type NextRenewInput = {
-    onUnauthorized?: NextUnauthorized;
     request: NextRequest;
     response: NextResponse;
+    unauthorizedUrl?: string;
 };
 
 export type NextRenewResult = {
@@ -149,13 +147,17 @@ export const createNextAuth = ({ cookie, renewUrl }: NextAuthConfig): NextAuth =
     }
 
     return {
-        renew: async ({ onUnauthorized, request, response }) => {
+        renew: async ({ request, response, unauthorizedUrl }) => {
+            const unauthorized = () =>
+                unauthorizedUrl
+                    ? NextResponse.redirect(new URL(unauthorizedUrl, request.url))
+                    : response;
             const token = parseSessionToken(request.cookies.get(names.sessionName)?.value);
 
             if (!token) {
                 return {
                     attempted: false,
-                    response: onUnauthorized ? onUnauthorized() : response,
+                    response: unauthorized(),
                     status: 401,
                 };
             }
@@ -178,7 +180,8 @@ export const createNextAuth = ({ cookie, renewUrl }: NextAuthConfig): NextAuth =
                 signal: AbortSignal.timeout(RENEW_TIMEOUT),
             });
 
-            const target = renewal.status === 401 && onUnauthorized ? onUnauthorized() : response;
+            const target =
+                renewal.status === 401 ? unauthorized() : response;
 
             return {
                 attempted: true,
