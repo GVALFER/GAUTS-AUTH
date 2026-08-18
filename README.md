@@ -246,6 +246,7 @@ import { nextAuth } from "./lib/auth.js";
 
 export const proxy = async (request: NextRequest) => {
     const response = NextResponse.next();
+
     const renewal = await nextAuth.renew({
         request,
         response,
@@ -558,7 +559,7 @@ const db = createPrismaAdapter({
 
 | Property                 | Type / allowed values                   | Required | Default              | Description                                                |
 | ------------------------ | --------------------------------------- | :------: | -------------------- | ---------------------------------------------------------- |
-| `client`                 | Generated Prisma client                 |    ✅    | —                    | Prisma client containing the three required auth models.    |
+| `client`                 | Generated Prisma client                 |    ✅    | —                    | Prisma client containing the three required auth models.   |
 | `models.users.table`     | Compatible user delegate name           |    ❌    | `"users"`            | Overrides the user delegate.                               |
 | `models.users.select`    | Unique scalar field array               |    ❌    | `[]`                 | Adds payload fields; `id` and `name` are always included.  |
 | `models.users.access`    | Scalar equality or allowed-value arrays |    ❌    | `{}`                 | Conditions required on the owning user/entity.             |
