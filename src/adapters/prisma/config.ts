@@ -1,6 +1,7 @@
 import { createError } from "../../errors.js";
 import { isRecord } from "../../session/guards.js";
 import type { AuthScalar } from "../../session/types.js";
+import { isPrivateField } from "../model.js";
 import type {
     PrismaAccessValue,
     PrismaDelegate,
@@ -23,12 +24,7 @@ const PRISMA_DEFAULTS = {
         select: ["id", "name"],
         table: "users",
     },
-    privateFields: ["hash", "password", "password_hash", "passwordHash"],
 } as const;
-
-const isPrivateField = (value: string): boolean => {
-    return PRISMA_DEFAULTS.privateFields.some((field) => field === value);
-};
 
 type ResolveDataModelInput = {
     client: object;

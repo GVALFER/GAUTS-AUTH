@@ -1,0 +1,38 @@
+model users {
+    id   String @id @default(uuid()) @db.VarChar(255)
+    name String @db.VarChar(255)
+
+    accounts user_accounts[]
+}
+
+model user_accounts {
+    id            String  @id @default(uuid()) @db.VarChar(255)
+    user_id       String  @db.VarChar(255)
+    email         String  @unique @db.VarChar(255)
+    password_hash String? @db.VarChar(255)
+
+    user     users              @relation(fields: [user_id], references: [id], onDelete: Cascade)
+    sessions account_sessions[]
+
+    @@index([user_id])
+}
+
+model account_sessions {
+    id         String    @id @default(uuid()) @db.VarChar(255)
+    account_id String    @db.VarChar(255)
+    token_hash String    @unique @db.VarChar(64)
+    ip         String?   @db.VarChar(45)
+    country    String?   @db.VarChar(2)
+    platform   String?   @db.VarChar(255)
+    agent      String?   @db.Text
+    expires_at DateTime  @db.Timestamp(0)
+    revoked_at DateTime? @db.Timestamp(0)
+    created_at DateTime  @default(now()) @db.Timestamp(0)
+    updated_at DateTime? @db.Timestamp(0)
+
+    account user_accounts @relation(fields: [account_id], references: [id], onDelete: Cascade)
+
+    @@index([account_id])
+    @@index([expires_at])
+    @@index([revoked_at])
+}

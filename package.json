@@ -16,7 +16,10 @@
         "authentication",
         "argon2",
         "bcrypt",
+        "drizzle",
         "hono",
+        "mariadb",
+        "mysql",
         "nextjs",
         "oauth",
         "session"
@@ -28,6 +31,8 @@
     },
     "files": [
         "dist",
+        "src/adapters/drizzle/schema.ts",
+        "src/adapters/prisma/schema.prisma",
         "LICENSE",
         "README.md",
         "SECURITY.md"
@@ -40,6 +45,10 @@
         "./prisma": {
             "types": "./dist/adapters/prisma/index.d.ts",
             "import": "./dist/adapters/prisma/index.js"
+        },
+        "./drizzle": {
+            "types": "./dist/adapters/drizzle/index.d.ts",
+            "import": "./dist/adapters/drizzle/index.js"
         },
         "./hono": {
             "types": "./dist/adapters/hono/index.d.ts",
@@ -58,7 +67,7 @@
         "clean": "node --eval \"import { rmSync } from 'node:fs'; rmSync('dist', { force: true, recursive: true })\"",
         "build": "npm run clean && tsc -p tsconfig.build.json",
         "typecheck": "tsc --noEmit",
-        "typecheck:examples": "npm run build && tsc -p examples/hono/tsconfig.json && tsc -p examples/next/tsconfig.json",
+        "typecheck:examples": "npm run build && tsc -p examples/drizzle/tsconfig.json && tsc -p examples/hono/tsconfig.json && tsc -p examples/next/tsconfig.json",
         "lint": "eslint src tests examples",
         "test": "node --import tsx --test tests/**/*.test.ts",
         "check": "npm run build && npm run lint && npm run typecheck && npm test",
@@ -72,10 +81,14 @@
         "bcryptjs": "^3.0.2"
     },
     "peerDependencies": {
+        "drizzle-orm": "^0.45.2",
         "hono": "^4.13.0",
         "next": ">=15.0.0"
     },
     "peerDependenciesMeta": {
+        "drizzle-orm": {
+            "optional": true
+        },
         "hono": {
             "optional": true
         },
@@ -86,9 +99,11 @@
     "devDependencies": {
         "@eslint/js": "^9.39.5",
         "@types/node": "^24.10.0",
+        "drizzle-orm": "^0.45.2",
         "eslint": "^9.39.5",
         "globals": "^16.5.0",
         "hono": "^4.13.0",
+        "mysql2": "^3.23.3",
         "next": "^16.2.12",
         "tsx": "^4.23.0",
         "typescript": "^5.9.3",

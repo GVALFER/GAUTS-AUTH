@@ -2,7 +2,7 @@
 
 Database-backed password authentication, opaque browser sessions, and optional social authentication for Node.js applications.
 
-`@gauts/auth` provides password hashing, session lifecycle, secure cookies, database validation, optional short caching, Prisma persistence, Hono integration, and Google/GitHub/X OAuth. The application keeps control of credential lookup, business-specific registration data, authorization, responses, and UI.
+`@gauts/auth` provides password hashing, session lifecycle, secure cookies, database validation, optional short caching, Prisma or Drizzle persistence, Hono integration, and Google/GitHub/X OAuth. The application keeps control of credential lookup, business-specific registration data, authorization, responses, and UI.
 
 ## Features
 
@@ -20,6 +20,7 @@ Database-backed password authentication, opaque browser sessions, and optional s
 | Platform validation            |   ✅    | Disabled            |
 | Hono adapter                   |   ✅    | Available           |
 | Prisma adapter                 |   ✅    | Available           |
+| Drizzle MySQL/MariaDB adapter  |   ✅    | Available           |
 | Next.js renewal adapter        |   ✅    | Available           |
 | Google social authentication   |   ✅    | Opt-in              |
 | GitHub social authentication   |   ✅    | Opt-in              |
@@ -40,25 +41,30 @@ The application defines its credential login, renewal, logout, and protected end
 
 ### 1. Install the package
 
-Run these commands inside the Hono API project:
+Run this command inside the Hono API project:
 
 ```bash
-npm install @gauts/auth
-npm install hono @prisma/client
+npm install @gauts/auth hono
 ```
 
-When the Next.js frontend is a separate project, run these commands inside the frontend project:
+When the Next.js frontend is a separate project, run this command inside the frontend project:
 
 ```bash
-npm install @gauts/auth
-npm install next
+npm install @gauts/auth next
 ```
 
-`hono`, `@prisma/client`, and `next` only need to be installed when the corresponding project does not already provide them. The API imports `@gauts/auth/hono` and `@gauts/auth/prisma`; the frontend imports `@gauts/auth/next`.
+`hono` and `next` only need to be installed when the corresponding project does not already provide them.
 
-### 2. Add the Prisma schema
+### 2. Choose the database adapter and schema
 
-The default adapter uses this fixed relationship tree:
+One database adapter is required. Prisma and Drizzle are equivalent persistence choices; install and configure only one.
+
+| Adapter | Database support | Setup |
+| ------- | ---------------- | ----- |
+| Prisma | Prisma-supported databases | [Use Prisma](#option-a--prisma) |
+| Drizzle | MySQL and MariaDB | [Use Drizzle](#option-b--drizzle-mysqlmariadb) |
+
+Both schemas use the same relationship tree:
 
 ```text
 users
@@ -66,48 +72,18 @@ users
     └── account_sessions
 ```
 
-Add the three required models to the API schema. Social authentication is an optional addon with its own schema instructions later in this README.
+Social authentication is an optional addon with separate schema instructions later in this README.
 
-```prisma
-model users {
-  id   String @id @default(uuid()) @db.VarChar(255)
-  name String @db.VarChar(255)
+#### Option A — Prisma
 
-  accounts user_accounts[]
-}
+Install Prisma inside the API project:
 
-model user_accounts {
-  id            String  @id @default(uuid()) @db.VarChar(255)
-  user_id       String  @db.VarChar(255)
-  email         String  @unique @db.VarChar(255)
-  password_hash String? @db.VarChar(255)
-
-  user     users             @relation(fields: [user_id], references: [id], onDelete: Cascade)
-  sessions account_sessions[]
-
-  @@index([user_id])
-}
-
-model account_sessions {
-  id          String    @id @default(uuid()) @db.VarChar(255)
-  account_id  String    @db.VarChar(255)
-  token_hash  String    @unique @db.VarChar(64)
-  ip          String?   @db.VarChar(45)
-  country     String?   @db.VarChar(2)
-  platform    String?   @db.VarChar(255)
-  agent       String?   @db.Text
-  expires_at  DateTime  @db.Timestamp(0)
-  revoked_at  DateTime? @db.Timestamp(0)
-  created_at  DateTime  @default(now()) @db.Timestamp(0)
-  updated_at  DateTime? @db.Timestamp(0)
-
-  account user_accounts @relation(fields: [account_id], references: [id], onDelete: Cascade)
-
-  @@index([account_id])
-  @@index([expires_at])
-  @@index([revoked_at])
-}
+```bash
+npm install @prisma/client
+npm install --save-dev prisma
 ```
+
+[View and copy the Prisma schema](./src/adapters/prisma/schema.prisma) into the application's Prisma schema.
 
 Create the migration through the application's Prisma workflow, then regenerate its client:
 
@@ -116,20 +92,58 @@ npx prisma migrate dev --name add_auth
 npx prisma generate
 ```
 
-### 3. Create the auth instance and routes
-
-Create the API auth instance:
+Create the database adapter:
 
 ```ts
-import { createHonoAuth } from "@gauts/auth/hono";
 import { createPrismaAdapter } from "@gauts/auth/prisma";
 
 import { prisma } from "./db.js";
 
+export const authDb = createPrismaAdapter({
+    client: prisma,
+});
+```
+
+#### Option B — Drizzle MySQL/MariaDB
+
+Install Drizzle and the application's MySQL driver inside the API project:
+
+```bash
+npm install drizzle-orm mysql2
+npm install --save-dev drizzle-kit
+```
+
+[View and copy the Drizzle MySQL/MariaDB schema](./src/adapters/drizzle/schema.ts) into the application.
+
+Create and apply the migration through the application's Drizzle workflow, then create the database adapter:
+
+```ts
+import { createDrizzleAdapter } from "@gauts/auth/drizzle";
+
+import { db } from "./db.js";
+import { accountSessions, userAccounts, users } from "./schema.js";
+
+export const authDb = createDrizzleAdapter({
+    client: db,
+    models: {
+        accounts: { table: userAccounts },
+        sessions: { table: accountSessions },
+        users: { table: users },
+    },
+});
+```
+
+### 3. Create the auth instance and routes
+
+This step is identical for Prisma and Drizzle:
+
+```ts
+import { createHonoAuth } from "@gauts/auth/hono";
+
+import { authDb } from "./authDb.js";
+
 export const auth = createHonoAuth({
-    db: createPrismaAdapter({
-        client: prisma,
-    }),
+    db: authDb,
 });
 ```
 
@@ -221,7 +235,6 @@ Call it from the Next.js middleware (proxy.ts) on protected routes:
 ```ts
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
-
 import { nextAuth } from "./lib/auth.js";
 
 export const proxy = async (request: NextRequest) => {
@@ -247,14 +260,16 @@ The application owns the redirect URL. When `unauthorizedUrl` is provided, the a
 
 - Node.js 22 or newer.
 - A database adapter.
+- Drizzle ORM 0.45.2 or newer when using the Drizzle adapter.
 - Hono 4 when using the Hono adapter.
 - Next.js 15 or newer when using the Next.js adapter.
 
-`hono` and `next` are optional peer dependencies. The Prisma adapter receives the application's generated Prisma client and does not import Prisma at runtime.
+`drizzle-orm`, `hono`, and `next` are optional peer dependencies. The Prisma adapter receives the application's generated Prisma client and does not import Prisma at runtime. The Drizzle adapter imports `drizzle-orm`, while the application owns the MySQL/MariaDB driver.
 
 | Import                  | Purpose                                                   |
 | ----------------------- | --------------------------------------------------------- |
 | `@gauts/auth`           | Password service, session core, errors, and public types. |
+| `@gauts/auth/drizzle`   | Drizzle database adapter for MySQL and MariaDB.           |
 | `@gauts/auth/prisma`    | Prisma database adapter.                                  |
 | `@gauts/auth/hono`      | Hono cookies, methods, and middleware.                    |
 | `@gauts/auth/next`      | Next.js renewal scheduling and `Set-Cookie` forwarding.   |
@@ -453,6 +468,8 @@ users
     └── account_sessions
 ```
 
+[View and copy the required Prisma schema](./src/adapters/prisma/schema.prisma).
+
 The required default delegate names are `prisma.users`, `prisma.user_accounts`, and `prisma.account_sessions`. The fixed Prisma relation fields are:
 
 - `user_accounts.user`;
@@ -554,6 +571,76 @@ access: {
 ```
 
 Every configured account and user condition must match. Omitting `access` applies no application-specific account restriction.
+
+### Drizzle MySQL/MariaDB adapter
+
+The Drizzle adapter supports MySQL and MariaDB. Install it inside the API project with the driver used by the application:
+
+```bash
+npm install @gauts/auth drizzle-orm mysql2
+```
+
+Unlike Prisma, Drizzle does not expose model delegates that can be discovered by name. Pass the application's table objects explicitly:
+
+```ts
+import { createDrizzleAdapter } from "@gauts/auth/drizzle";
+import { createHonoAuth } from "@gauts/auth/hono";
+import { db } from "./db.js";
+import { accountSessions, userAccounts, users } from "./schema.js";
+
+export const auth = createHonoAuth({
+    db: createDrizzleAdapter({
+        client: db,
+        models: {
+            accounts: { table: userAccounts },
+            sessions: { table: accountSessions },
+            users: { table: users },
+        },
+    }),
+});
+```
+
+The minimum Drizzle schema uses the same relationship tree and canonical TypeScript field names as the Prisma adapter. [View and copy the required Drizzle MySQL/MariaDB schema](./src/adapters/drizzle/schema.ts).
+
+The adapter queries these tables through explicit SQL joins, so Drizzle `relations()` declarations are not required. Physical SQL column names may use aliases, but the TypeScript keys shown above are part of the adapter contract. Date columns must use `{ mode: "date" }`.
+
+`select` and `access` work exactly like the Prisma adapter and are inferred from the supplied table:
+
+```ts
+const database = createDrizzleAdapter({
+    client: db,
+    models: {
+        accounts: {
+            access: {
+                role: ["OWNER", "ADMIN"],
+                status: ["ACTIVE"],
+            },
+            select: ["role", "status", "timezone"],
+            table: userAccounts,
+        },
+        sessions: { table: accountSessions },
+        users: {
+            access: { status: ["ACTIVE", "PENDING"] },
+            select: ["status"],
+            table: users,
+        },
+    },
+});
+```
+
+| Property                 | Required | Description                                                            |
+| ------------------------ | :------: | ---------------------------------------------------------------------- |
+| `client`                 |    ✅    | Drizzle MySQL client created by the application.                       |
+| `models.users.table`     |    ✅    | Table with `id` and `name` columns.                                    |
+| `models.users.select`    |    ❌    | Additional public scalar fields; `id` and `name` are always included.  |
+| `models.users.access`    |    ❌    | Required values for the owning user/entity.                            |
+| `models.accounts.table`  |    ✅    | Table with `id`, `email`, and `user_id` columns.                       |
+| `models.accounts.select` |    ❌    | Additional public scalar fields; `id` and `email` are always included. |
+| `models.accounts.access` |    ❌    | Required values for the authenticating account.                        |
+| `models.sessions.table`  |    ✅    | Table implementing the complete documented session column contract.    |
+| `models.socials.table`   |    ❌    | Enables social persistence when the optional social table is supplied. |
+
+Private password fields are rejected from `select` and `access` by both TypeScript and runtime validation. The adapter does not load or execute the Prisma adapter, and Prisma is not required in a Drizzle application.
 
 ### Next.js adapter
 
@@ -657,7 +744,7 @@ type Session = {
 };
 ```
 
-The Prisma adapter refines `account` and `user` with the exact additional scalar fields declared in their respective `select` arrays.
+The Prisma and Drizzle adapters refine `account` and `user` with the exact additional scalar fields declared in their respective `select` arrays.
 
 Only `account_id` is copied into the session row. Current account/user data is loaded through the fixed database relations and is never duplicated in the session table.
 
@@ -673,7 +760,7 @@ await auth.createSession({
 });
 ```
 
-`country` is normalized to uppercase and is never used for authentication or client matching. It is not resolved by the package and does not trigger GeoIP work during normal requests. When supplied, the configured session model must provide a nullable `country` column. When omitted, the Prisma adapter does not send the field.
+`country` is normalized to uppercase and is never used for authentication or client matching. It is not resolved by the package and does not trigger GeoIP work during normal requests. When supplied, the configured session model must provide a nullable `country` column. When omitted, the database adapter does not send the field.
 
 ### Methods
 
@@ -693,7 +780,9 @@ await auth.createSession({
 
 Social authentication is an optional addon and remains disabled unless `social` is configured. Complete these steps only in applications that need Google, GitHub, or X authentication.
 
-### 1. Add the social Prisma schema
+### 1. Add social persistence
+
+#### Prisma
 
 Add the social relation inside the existing `user_accounts` model in the API schema:
 
@@ -744,6 +833,49 @@ const db = createPrismaAdapter({
     },
 });
 ```
+
+#### Drizzle MySQL/MariaDB
+
+Add the provider table to the API schema:
+
+```ts
+export const socialAccounts = mysqlTable(
+    "social_accounts",
+    {
+        account_id: varchar("account_id", { length: 255 })
+            .notNull()
+            .references(() => userAccounts.id, { onDelete: "cascade" }),
+        created_at: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
+        id: varchar("id", { length: 255 }).primaryKey(),
+        provider: varchar("provider", { length: 32 }).notNull(),
+        provider_id: varchar("provider_id", { length: 255 }).notNull(),
+    },
+    (table) => [
+        index("social_accounts_account_id_idx").on(table.account_id),
+        uniqueIndex("social_accounts_provider_provider_id_key").on(
+            table.provider,
+            table.provider_id,
+        ),
+        uniqueIndex("social_accounts_account_id_provider_key").on(table.account_id, table.provider),
+    ],
+);
+```
+
+Then supply it to the adapter:
+
+```ts
+const db = createDrizzleAdapter({
+    client,
+    models: {
+        accounts: { table: userAccounts },
+        sessions: { table: accountSessions },
+        socials: { table: socialAccounts },
+        users: { table: users },
+    },
+});
+```
+
+Omitting `models.socials` keeps the Drizzle adapter session-only. The adapter creates the owning user and account in one transaction during default social registration, so that path requires a Drizzle MySQL driver with transaction support. Additional required user/account columns must have database defaults; otherwise the application must provide `registration.createAccount`.
 
 ### 2. Configure the providers
 
@@ -831,12 +963,12 @@ The package does not create the application route, session, notifications, logs,
 
 ### Social configuration
 
-| Property                     | Type / allowed values                |  Required   | Default   | Description                                                                |
-| ---------------------------- | ------------------------------------ | :---------: | --------- | -------------------------------------------------------------------------- |
-| `social.providers`           | `SocialProvider[]`                   |     ✅      | —         | Configured Google, GitHub, or X providers.                                 |
-| `social.cookieName`          | Valid cookie name                    |     ❌      | `"__soc"` | Signed temporary OAuth/registration transaction cookie.                    |
-| `social.registration`        | `SocialRegistrationConfig`           |     ❌      | Disabled  | Enables default or application-specific social registration.               |
-| `registration.createAccount` | Async callback returning `accountId` |     ❌      | Built-in  | Creates required business data when the default structure is insufficient. |
+| Property                     | Type / allowed values                | Required | Default   | Description                                                                |
+| ---------------------------- | ------------------------------------ | :------: | --------- | -------------------------------------------------------------------------- |
+| `social.providers`           | `SocialProvider[]`                   |    ✅    | —         | Configured Google, GitHub, or X providers.                                 |
+| `social.cookieName`          | Valid cookie name                    |    ❌    | `"__soc"` | Signed temporary OAuth/registration transaction cookie.                    |
+| `social.registration`        | `SocialRegistrationConfig`           |    ❌    | Disabled  | Enables default or application-specific social registration.               |
+| `registration.createAccount` | Async callback returning `accountId` |    ❌    | Built-in  | Creates required business data when the default structure is insufficient. |
 
 Provider configuration:
 
@@ -1074,7 +1206,7 @@ const socialDb = {
 } satisfies SocialDbAdapter;
 ```
 
-The Prisma adapter already implements both `DbAdapter` and `SocialDbAdapter`.
+The Prisma and Drizzle adapters implement both `DbAdapter` and `SocialDbAdapter` when their optional social model is available.
 
 ## Performance
 

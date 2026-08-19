@@ -1,22 +1,7 @@
-import { isAuthValue, isNullableString, isRecord } from "../../session/guards.js";
-import type {
-    AuthAccount,
-    AuthData,
-    AuthSessionRecord,
-    AuthValue,
-    SessionRecord,
-} from "../../session/types.js";
-import type { PrismaAccessValue, ResolvedPrismaDataModel } from "./types.js";
-
-type ReadAccountResult = {
-    account: AuthAccount;
-    allowed: boolean;
-};
-
-type ReadDataInput = {
-    model: ResolvedPrismaDataModel;
-    value: unknown;
-};
+import { isRecord } from "../../session/guards.js";
+import type { AuthSessionRecord } from "../../session/types.js";
+import { readAdapterAccount, requireSessionRecord, requireSessionRecords } from "../model.js";
+import type { ResolvedPrismaDataModel } from "./types.js";
 
 type ReadAccountInput = {
     accounts: ResolvedPrismaDataModel;
@@ -33,11 +18,6 @@ type RequireAuthRowInput = {
 type CreateAuthSelectInput = {
     accounts: ResolvedPrismaDataModel;
     users: ResolvedPrismaDataModel;
-};
-
-type MatchesAccessInput = {
-    access: Record<string, PrismaAccessValue>;
-    value: Record<string, unknown>;
 };
 
 type CreateAccountSelectInput = {
@@ -57,26 +37,6 @@ export const sessionSelect = {
     token_hash: true,
     updated_at: true,
 } as const;
-
-const isNullableDate = (value: unknown): value is Date | null => {
-    return value instanceof Date || value === null;
-};
-
-const isSessionRecord = (value: unknown): value is SessionRecord => {
-    return (
-        isRecord(value) &&
-        typeof value.account_id === "string" &&
-        isNullableString(value.agent) &&
-        value.created_at instanceof Date &&
-        value.expires_at instanceof Date &&
-        typeof value.id === "string" &&
-        isNullableString(value.ip) &&
-        isNullableString(value.platform) &&
-        isNullableDate(value.revoked_at) &&
-        typeof value.token_hash === "string" &&
-        isNullableDate(value.updated_at)
-    );
-};
 
 const createModelSelect = (model: ResolvedPrismaDataModel): Record<string, true> => {
     return Object.fromEntries(
@@ -98,90 +58,23 @@ export const createAuthSelect = ({ accounts, users }: CreateAuthSelectInput) => 
     },
 });
 
-const matchesAccess = ({ access, value }: MatchesAccessInput): boolean => {
-    return Object.entries(access).every(([field, expected]) => {
-        const current = value[field];
-        return Array.isArray(expected)
-            ? expected.some((allowed) => Object.is(allowed, current))
-            : Object.is(expected, current);
+export const readAccount = ({ accounts, users, value }: ReadAccountInput) => {
+    if (!isRecord(value)) {
+        throw new Error("Prisma account relation returned invalid data.");
+    }
+
+    return readAdapterAccount({
+        account: value,
+        accounts: { ...accounts, source: accounts.table },
+        adapter: "Prisma",
+        user: value.user,
+        users: { ...users, source: users.table },
     });
 };
 
-const readData = ({ model, value }: ReadDataInput): AuthData => {
-    if (!isRecord(value)) {
-        throw new Error(`Prisma model ${model.table} returned invalid data.`);
-    }
+export const requireRow = (value: unknown) => requireSessionRecord({ adapter: "Prisma", value });
 
-    const data: Record<string, AuthValue> = {};
-
-    for (const field of model.select) {
-        const fieldValue = value[field];
-
-        if (!isAuthValue(fieldValue) || isRecord(fieldValue) || Array.isArray(fieldValue)) {
-            throw new Error(`Prisma field ${model.table}.${field} returned invalid payload data.`);
-        }
-
-        data[field] = fieldValue;
-    }
-
-    return data;
-};
-
-export const readAccount = ({ accounts, users, value }: ReadAccountInput): ReadAccountResult => {
-    if (!isRecord(value)) {
-        throw new Error("Prisma account relation returned invalid data.");
-    }
-
-    const userValue = value.user;
-    const account: Record<string, AuthValue> & { user: AuthData } = {
-        ...readData({ model: accounts, value }),
-        user: readData({ model: users, value: userValue }),
-    };
-
-    if (
-        typeof account.id !== "string" ||
-        typeof account.email !== "string" ||
-        typeof account.user.id !== "string" ||
-        typeof account.user.name !== "string"
-    ) {
-        throw new Error("Prisma account relation returned invalid data.");
-    }
-
-    return {
-        account: account as AuthAccount,
-        allowed:
-            matchesAccess({ access: accounts.access, value }) &&
-            isRecord(userValue) &&
-            matchesAccess({ access: users.access, value: userValue }),
-    };
-};
-
-export const requireRow = (value: unknown): SessionRecord => {
-    if (!isSessionRecord(value)) {
-        throw new Error("Prisma session table returned invalid data.");
-    }
-
-    return {
-        account_id: value.account_id,
-        agent: value.agent,
-        created_at: value.created_at,
-        expires_at: value.expires_at,
-        id: value.id,
-        ip: value.ip,
-        platform: value.platform,
-        revoked_at: value.revoked_at,
-        token_hash: value.token_hash,
-        updated_at: value.updated_at,
-    };
-};
-
-export const requireRows = (value: unknown): SessionRecord[] => {
-    if (!Array.isArray(value)) {
-        throw new Error("Prisma session table returned invalid data.");
-    }
-
-    return value.map(requireRow);
-};
+export const requireRows = (value: unknown) => requireSessionRecords({ adapter: "Prisma", value });
 
 export const requireAuthRow = ({
     accounts,
