@@ -218,6 +218,7 @@ const assertTypes = () => {
                 },
             },
         }),
+        secret: "s".repeat(32),
         session: { validation: [] },
     });
     type InlineAccount = NonNullable<Awaited<ReturnType<typeof inline.session.resolve>>>["account"];

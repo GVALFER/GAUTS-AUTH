@@ -8,7 +8,7 @@ if (!apiUrl) {
 
 export const auth = createNextAuth({
     cookie: {
-        renewName: "__app_ren",
+        contextName: "__app_ctx",
         sessionName: "__app_ses",
     },
     renewUrl: new URL("/auth/renew", apiUrl).toString(),

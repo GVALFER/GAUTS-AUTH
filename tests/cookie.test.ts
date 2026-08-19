@@ -3,8 +3,6 @@ import { describe, it } from "node:test";
 
 import { isAuthError } from "../src/errors.js";
 import {
-    formatRenewAt,
-    parseRenewAt,
     parseSessionToken,
     resolveSessionCookieName,
     resolveSessionCookieNames,
@@ -21,39 +19,20 @@ describe("session cookies", () => {
         assert.equal(parseSessionToken("a".repeat(42)), null);
     });
 
-    it("resolves separate session, cache, and renewal names", () => {
+    it("resolves separate session and context names", () => {
         assert.deepEqual(resolveSessionCookieNames(), {
-            cacheName: "__cac",
-            renewName: "__ren",
+            contextName: "__ctx",
             sessionName: "__ses",
         });
         assert.deepEqual(
             resolveSessionCookieNames({
-                cacheName: "__admin_cac",
-                renewName: "__admin_ren",
+                contextName: "__admin_ctx",
                 sessionName: "__admin_sec",
             }),
             {
-                cacheName: "__admin_cac",
-                renewName: "__admin_ren",
+                contextName: "__admin_ctx",
                 sessionName: "__admin_sec",
             },
-        );
-    });
-
-    it("formats and parses renewal timestamps in Unix seconds", () => {
-        assert.equal(formatRenewAt(new Date("2026-08-17T12:00:00.999Z")), "1786968000");
-        assert.equal(parseRenewAt("1786968000"), 1786968000);
-        assert.equal(parseRenewAt(" 1786968000 "), 1786968000);
-        assert.equal(parseRenewAt(), null);
-        assert.equal(parseRenewAt("0"), null);
-        assert.equal(parseRenewAt("1.5"), null);
-        assert.equal(parseRenewAt("invalid"), null);
-        assert.equal(parseRenewAt(Number.MAX_SAFE_INTEGER.toString()), Number.MAX_SAFE_INTEGER);
-        assert.equal(parseRenewAt(`${Number.MAX_SAFE_INTEGER.toString()}0`), null);
-        assert.throws(
-            () => formatRenewAt(new Date("invalid")),
-            (error) => isAuthError(error) && error.code === "SESSION_DATA_INVALID",
         );
     });
 
@@ -66,7 +45,7 @@ describe("session cookies", () => {
         assert.throws(
             () =>
                 resolveSessionCookieNames({
-                    cacheName: "session",
+                    contextName: "session",
                     sessionName: "session",
                 }),
             (error) => isAuthError(error) && error.code === "AUTH_CONFIG_INVALID",

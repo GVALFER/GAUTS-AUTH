@@ -18,6 +18,7 @@ import type { DbAdapter, ResolvedSession, Session } from "../src/session/types.j
 import type { SocialDbAdapter, SocialProvider } from "../src/social/types.js";
 
 const token = "a".repeat(43);
+const secret = "s".repeat(32);
 const now = Date.now();
 
 const account = {
@@ -78,8 +79,8 @@ const createMockAuth = (): Auth<typeof account> => ({
         async list() {
             return [];
         },
-        async renew() {
-            return { ...resolved, renewed: true };
+        async renew(input) {
+            return input.token === token ? { ...resolved, renewed: true } : null;
         },
         async resolve(input) {
             return input.token === token ? resolved : null;
@@ -153,6 +154,7 @@ describe("Express adapter", () => {
         const auth = createExpressAdapter({
             auth: createMockAuth(),
             cookie: { secure: false },
+            secret,
         });
         const app = express();
 
@@ -195,7 +197,7 @@ describe("Express adapter", () => {
             assert.equal(login.status, 204);
             assert.equal(loginCookies.length, 2);
             assert.ok(loginCookies.some((value) => value.startsWith(`__ses=${token}`)));
-            assert.ok(loginCookies.some((value) => value.startsWith("__ren=")));
+            assert.ok(loginCookies.some((value) => value.startsWith("__ctx=")));
 
             const protectedResponse = await fetch(`${base}/account`, {
                 headers: { ...headers, Cookie: `__ses=${token}` },
@@ -213,14 +215,14 @@ describe("Express adapter", () => {
             });
 
             assert.deepEqual(await logout.json(), { revoked: [session.id] });
-            assert.equal(getSetCookies(logout.headers).length, 3);
+            assert.equal(getSetCookies(logout.headers).length, 2);
 
             const invalid = await fetch(`${base}/account`, {
                 headers: { ...headers, Cookie: `__ses=${"b".repeat(43)}` },
             });
 
             assert.equal(invalid.status, 401);
-            assert.equal(getSetCookies(invalid.headers).length, 3);
+            assert.equal(getSetCookies(invalid.headers).length, 2);
         } finally {
             await new Promise<void>((resolve, reject) => {
                 server.close((error) => (error ? reject(error) : resolve()));
@@ -234,6 +236,7 @@ describe("Fastify adapter", () => {
         const auth = createFastifyAdapter({
             auth: createMockAuth(),
             cookie: { secure: false },
+            secret,
         });
         const app = Fastify();
 
@@ -263,7 +266,7 @@ describe("Fastify adapter", () => {
         assert.equal(login.statusCode, 204);
         assert.equal(login.cookies.length, 2);
         assert.ok(login.cookies.some((value) => value.name === "__ses" && value.value === token));
-        assert.ok(login.cookies.some((value) => value.name === "__ren"));
+        assert.ok(login.cookies.some((value) => value.name === "__ctx"));
 
         const protectedResponse = await app.inject({
             headers: { ...headers, cookie: `__ses=${token}` },
@@ -285,7 +288,7 @@ describe("Fastify adapter", () => {
         });
 
         assert.deepEqual(logout.json(), { revoked: [session.id] });
-        assert.equal(logout.cookies.length, 3);
+        assert.equal(logout.cookies.length, 2);
 
         const invalid = await app.inject({
             headers: { ...headers, cookie: `__ses=${"b".repeat(43)}` },
@@ -294,7 +297,7 @@ describe("Fastify adapter", () => {
         });
 
         assert.equal(invalid.statusCode, 401);
-        assert.equal(invalid.cookies.length, 3);
+        assert.equal(invalid.cookies.length, 2);
         await app.close();
     });
 });

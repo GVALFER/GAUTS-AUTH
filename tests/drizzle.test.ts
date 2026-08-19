@@ -116,7 +116,7 @@ const createModels = () => ({
 const assertTypes = () => {
     const { client } = createClient();
     const db = createDrizzleAdapter({ client, models: createModels() });
-    const auth = createHonoAuth({ db });
+    const auth = createHonoAuth({ db, secret: "s".repeat(32) });
     type Account = NonNullable<Awaited<ReturnType<typeof db.findToken>>>["account"];
     type AuthData = NonNullable<Awaited<ReturnType<typeof auth.session.resolve>>>["account"];
     const typed = null as unknown as Account;

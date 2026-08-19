@@ -4,6 +4,7 @@ import { Hono } from "hono";
 import { createHonoAdapter, type HonoAuthEnv } from "../src/adapters/hono/index.js";
 import type { Auth } from "../src/auth.js";
 import { createError, isAuthError } from "../src/errors.js";
+import { createSessionState } from "../src/session/state.js";
 import type { RenewedSession, ResolvedSession, Session } from "../src/session/types.js";
 
 const token = "a".repeat(43);
@@ -39,7 +40,25 @@ const session: Session = {
 };
 
 const resolved: ResolvedSession<typeof account> = { account, session };
-const renewAt = Math.floor(session.renew_at.getTime() / 1000).toString();
+
+const createContext = ({
+    cache = true,
+    value = resolved,
+}: {
+    cache?: boolean;
+    value?: ResolvedSession<typeof account>;
+} = {}) => {
+    return createSessionState<typeof account>({
+        ...(cache ? { cache: { ttl: 60 } } : {}),
+        secret,
+        session: {
+            maxLifetime: 30 * 24 * 60 * 60,
+            renewInterval: 24 * 60 * 60,
+            ttl: 7 * 24 * 60 * 60,
+            validation: ["ip", "agent"],
+        },
+    }).create({ resolved: value, token }).value;
+};
 
 const getSetCookies = (response: Response): string[] => {
     const headers = response.headers as Headers & { getSetCookie?: () => string[] };
@@ -118,18 +137,13 @@ const createApp = ({ auth, cache = false }: { auth: Auth<typeof account>; cache?
     const adapter = createHonoAdapter({
         auth,
         cookie: {
-            cacheName: "session-cache",
-            renewName: "session-renew",
+            contextName: "session-context",
             secure: false,
             sessionName: "session",
         },
         getIp: (c) => c.req.header("x-forwarded-for"),
-        ...(cache
-            ? {
-                  cache: { ttl: 60 },
-                  secret,
-              }
-            : {}),
+        ...(cache ? { cache: { ttl: 60 } } : {}),
+        secret,
     });
     const app = new Hono<HonoAuthEnv>();
 
@@ -164,17 +178,15 @@ const identityHeaders = {
 describe("Hono adapter", () => {
     it("exposes the resolved cookie names", () => {
         const auth = createMockAuth(async () => resolved);
-        const defaults = createHonoAdapter({ auth: withoutIpValidation(auth) });
+        const defaults = createHonoAdapter({ auth: withoutIpValidation(auth), secret });
         const { adapter } = createApp({ auth });
 
         assert.deepEqual(defaults.cookie, {
-            cacheName: "__cac",
-            renewName: "__ren",
+            contextName: "__ctx",
             sessionName: "__ses",
         });
         assert.deepEqual(adapter.cookie, {
-            cacheName: "session-cache",
-            renewName: "session-renew",
+            contextName: "session-context",
             sessionName: "session",
         });
     });
@@ -183,12 +195,12 @@ describe("Hono adapter", () => {
         const auth = withoutIpValidation(createMockAuth(async () => resolved));
         let client: unknown;
 
-        auth.session.resolve = async (input) => {
+        auth.session.renew = async (input) => {
             client = input.client;
-            return resolved;
+            return { ...resolved, renewed: false };
         };
 
-        const adapter = createHonoAdapter({ auth });
+        const adapter = createHonoAdapter({ auth, secret });
         const app = new Hono();
 
         app.get("/protected", adapter.requireSession, (c) => c.body(null, 204));
@@ -206,15 +218,17 @@ describe("Hono adapter", () => {
             ip: null,
             platform: "macOS",
         });
+        assert.equal(getCookiePair(response, "__ses"), `__ses=${token}`);
+        assert.match(getCookiePair(response, "__ctx") ?? "", /^__ctx=.+/);
     });
 
-    it("resolves through the database without cookie writes when cache is disabled", async () => {
+    it("resolves through the database without cookie writes when context is valid and cache is disabled", async () => {
         const { app } = createApp({
             auth: createMockAuth(async () => resolved),
         });
         const response = await app.request("/protected", {
             headers: {
-                Cookie: `session=${token}`,
+                Cookie: `session=${token}; session-context=${createContext({ cache: false })}`,
                 ...identityHeaders,
             },
         });
@@ -237,7 +251,7 @@ describe("Hono adapter", () => {
         const first = await app.request("/protected", {
             headers: { Cookie: `session=${token}`, ...identityHeaders },
         });
-        const cached = getCookiePair(first, "session-cache");
+        const cached = getCookiePair(first, "session-context");
 
         assert.equal(first.status, 200);
         assert.ok(cached);
@@ -245,7 +259,7 @@ describe("Hono adapter", () => {
 
         const second = await app.request("/protected", {
             headers: {
-                Cookie: `session=${token}; ${cached}; session-renew=${renewAt}`,
+                Cookie: `session=${token}; ${cached}`,
                 ...identityHeaders,
             },
         });
@@ -266,7 +280,7 @@ describe("Hono adapter", () => {
         const first = await app.request("/protected", {
             headers: { Cookie: `session=${token}`, ...identityHeaders },
         });
-        const cached = getCookiePair(first, "session-cache");
+        const cached = getCookiePair(first, "session-context");
 
         assert.ok(cached);
         active = false;
@@ -291,7 +305,7 @@ describe("Hono adapter", () => {
         assert.match(getCookiePair(unsafe, "session") ?? "", /^session=$/);
     });
 
-    it("bypasses and clears the cache for unsafe methods", async () => {
+    it("bypasses cache for unsafe methods while preserving signed scheduling", async () => {
         let resolveCalls = 0;
         const auth = createMockAuth(async () => {
             resolveCalls += 1;
@@ -301,23 +315,22 @@ describe("Hono adapter", () => {
         const first = await app.request("/protected", {
             headers: { Cookie: `session=${token}`, ...identityHeaders },
         });
-        const cached = getCookiePair(first, "session-cache");
+        const cached = getCookiePair(first, "session-context");
 
         assert.ok(cached);
 
         const response = await app.request("/protected", {
             method: "POST",
             headers: {
-                Cookie: `session=${token}; ${cached}; session-renew=${renewAt}`,
+                Cookie: `session=${token}; ${cached}`,
                 ...identityHeaders,
             },
         });
 
         assert.equal(response.status, 204);
         assert.equal(resolveCalls, 2);
-        assert.match(getCookiePair(response, "session-cache") ?? "", /^session-cache=$/);
+        assert.match(getCookiePair(response, "session-context") ?? "", /^session-context=.+/);
         assert.equal(getCookiePair(response, "session"), null);
-        assert.equal(getCookiePair(response, "session-renew"), null);
     });
 
     it("falls through to database validation for altered or mismatched cache data", async () => {
@@ -330,7 +343,7 @@ describe("Hono adapter", () => {
         const first = await app.request("/protected", {
             headers: { Cookie: `session=${token}`, ...identityHeaders },
         });
-        const cached = getCookiePair(first, "session-cache");
+        const cached = getCookiePair(first, "session-context");
 
         assert.ok(cached);
 
@@ -353,7 +366,7 @@ describe("Hono adapter", () => {
         assert.equal(resolveCalls, 3);
     });
 
-    it("renews the session, marker, and cache only through renewSession", async () => {
+    it("renews explicitly and writes the session and context cookies", async () => {
         const auth = createMockAuth(async () => resolved);
         let renewCalls = 0;
         auth.session.renew = async (input) => {
@@ -370,24 +383,53 @@ describe("Hono adapter", () => {
         assert.equal(response.status, 204);
         assert.equal(renewCalls, 1);
         assert.equal(getCookiePair(response, "session"), `session=${token}`);
-        assert.equal(getCookiePair(response, "session-renew"), `session-renew=${renewAt}`);
-        assert.match(getCookiePair(response, "session-cache") ?? "", /^session-cache=.+/);
+        assert.match(getCookiePair(response, "session-context") ?? "", /^session-context=.+/);
 
         const cookies = getSetCookies(response);
         const sessionCookie = cookies.find((cookie) => cookie.startsWith("session="));
-        const renewCookie = cookies.find((cookie) => cookie.startsWith("session-renew="));
+        const contextCookie = cookies.find((cookie) => cookie.startsWith("session-context="));
 
         assert.match(
             sessionCookie ?? "",
             new RegExp(`Expires=${session.expires_at.toUTCString()}`),
         );
-        assert.match(renewCookie ?? "", new RegExp(`Expires=${session.expires_at.toUTCString()}`));
+        assert.match(contextCookie ?? "", new RegExp(`Expires=${session.expires_at.toUTCString()}`));
 
         for (const cookie of cookies) {
             assert.match(cookie, /HttpOnly/);
             assert.match(cookie, /SameSite=Lax/);
             assert.match(cookie, /Expires=/);
         }
+    });
+
+    it("renews automatically through requireSession when the signed schedule is due", async () => {
+        const due: ResolvedSession<typeof account> = {
+            account,
+            session: {
+                ...session,
+                renew_at: new Date(testNow - 1_000),
+            },
+        };
+        const auth = createMockAuth(async () => resolved);
+        let renewCalls = 0;
+
+        auth.session.renew = async () => {
+            renewCalls += 1;
+            return { ...resolved, renewed: true };
+        };
+
+        const { app } = createApp({ auth, cache: true });
+        const response = await app.request("/protected", {
+            headers: {
+                Cookie: `session=${token}; session-context=${createContext({ value: due })}`,
+                ...identityHeaders,
+            },
+        });
+
+        assert.equal(response.status, 200);
+        assert.equal(renewCalls, 1);
+        assert.equal(getCookiePair(response, "session"), `session=${token}`);
+        assert.match(getCookiePair(response, "session-context") ?? "", /^session-context=.+/);
     });
 
     it("clears all browser cookies for malformed, invalid, and mismatched sessions", async () => {
@@ -422,12 +464,11 @@ describe("Hono adapter", () => {
 
         for (const response of [malformedResponse, invalidResponse, mismatchResponse]) {
             assert.match(getCookiePair(response, "session") ?? "", /^session=$/);
-            assert.match(getCookiePair(response, "session-cache") ?? "", /^session-cache=$/);
-            assert.match(getCookiePair(response, "session-renew") ?? "", /^session-renew=$/);
+            assert.match(getCookiePair(response, "session-context") ?? "", /^session-context=$/);
         }
     });
 
-    it("creates and revokes all three browser cookies without exposing token wiring", async () => {
+    it("creates and revokes both browser cookies without exposing token wiring", async () => {
         const auth = createMockAuth(async () => resolved);
         auth.session.create = async (input) => {
             assert.deepEqual(input, {
@@ -469,12 +510,10 @@ describe("Hono adapter", () => {
 
         assert.deepEqual(await setResponse.json(), { account_id: account.id });
         assert.equal(getCookiePair(setResponse, "session"), `session=${token}`);
-        assert.equal(getCookiePair(setResponse, "session-renew"), `session-renew=${renewAt}`);
-        assert.match(getCookiePair(setResponse, "session-cache") ?? "", /^session-cache=.+/);
+        assert.match(getCookiePair(setResponse, "session-context") ?? "", /^session-context=.+/);
         assert.deepEqual(await revokeResponse.json(), { revoked: [session.id] });
         assert.match(getCookiePair(revokeResponse, "session") ?? "", /^session=$/);
-        assert.match(getCookiePair(revokeResponse, "session-cache") ?? "", /^session-cache=$/);
-        assert.match(getCookiePair(revokeResponse, "session-renew") ?? "", /^session-renew=$/);
+        assert.match(getCookiePair(revokeResponse, "session-context") ?? "", /^session-context=$/);
     });
 
     it("keeps browser cookies when database revocation fails", async () => {
@@ -503,11 +542,11 @@ describe("Hono adapter", () => {
         const auth = createMockAuth(async () => resolved);
 
         assert.throws(
-            () => createHonoAdapter({ auth }),
+            () => createHonoAdapter({ auth, secret }),
             (error) => isAuthError(error) && error.code === "AUTH_CONFIG_INVALID",
         );
         assert.throws(
-            () => createHonoAdapter({ auth, getIp: null as never }),
+            () => createHonoAdapter({ auth, getIp: null as never, secret }),
             (error) => isAuthError(error) && error.code === "AUTH_CONFIG_INVALID",
         );
         assert.throws(
@@ -516,6 +555,7 @@ describe("Hono adapter", () => {
                     auth,
                     cookie: { secure: false, sessionName: "__Host-session" },
                     getIp: () => null,
+                    secret,
                 }),
             (error) => isAuthError(error) && error.code === "AUTH_CONFIG_INVALID",
         );
@@ -525,6 +565,7 @@ describe("Hono adapter", () => {
                     auth,
                     cache: { ttl: 60 },
                     getIp: () => null,
+                    secret: undefined as never,
                 }),
             (error) => isAuthError(error) && error.code === "AUTH_CONFIG_INVALID",
         );

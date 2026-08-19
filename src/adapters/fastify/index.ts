@@ -1,7 +1,7 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { createAuth, type Auth, type AuthDeps } from "../../auth.js";
-import type { SessionCacheConfig } from "../../session/cache.js";
 import type { SessionCookieNames } from "../../session/cookie.js";
+import type { SessionCacheConfig } from "../../session/state.js";
 import type { AuthAccount, DbAdapter, ResolvedSession, Session } from "../../session/types.js";
 import type { SocialConfig, SocialDbAdapter } from "../../social/types.js";
 import { resolveHttpCookie } from "../utils/cookie.js";
@@ -10,7 +10,7 @@ import { createHttpSession } from "../utils/session.js";
 import type { HttpCookieConfig } from "../utils/types.js";
 import { createFastifySocial, type FastifySocial } from "./social.js";
 
-export type { SessionCacheConfig } from "../../session/cache.js";
+export type { SessionCacheConfig } from "../../session/state.js";
 export type { FastifySocial, FastifySocialHandler } from "./social.js";
 
 export type FastifyAuthContext<TAccount extends AuthAccount = AuthAccount> = {
@@ -25,34 +25,25 @@ export type FastifyGetIp = (
     request: FastifyRequest,
 ) => Promise<string | null | undefined> | string | null | undefined;
 
-type FastifyCacheOptions =
-    | {
-          cache: SessionCacheConfig;
-          secret: string;
-      }
-    | {
-          cache?: undefined;
-          secret?: string;
-      };
-
 export type FastifyAdapterConfig<TAccount extends AuthAccount = AuthAccount> = {
     auth: Auth<TAccount>;
     cache?: SessionCacheConfig;
     cookie?: FastifyCookieConfig;
     getIp?: FastifyGetIp;
-    secret?: string;
+    secret: string;
 };
 
 type FastifyAuthBase<TAccount extends AuthAccount> = Omit<AuthDeps<TAccount>, "db"> & {
+    cache?: SessionCacheConfig;
     cookie?: FastifyCookieConfig;
     db: DbAdapter<TAccount>;
     getIp?: FastifyGetIp;
+    secret: string;
 };
 
 type FastifySocialOptions<TAccount extends AuthAccount, TData> =
     | {
           db: DbAdapter<TAccount> & SocialDbAdapter<TAccount>;
-          secret: string;
           social: SocialConfig<TData>;
       }
     | {
@@ -64,11 +55,9 @@ export type FastifyAuthConfig<TAccount extends AuthAccount = AuthAccount, TData 
     FastifyAuthBase<TAccount>,
     "db"
 > &
-    FastifyCacheOptions &
     FastifySocialOptions<TAccount, TData>;
 
-type FastifyAuthOptions<TAccount extends AuthAccount> = Omit<FastifyAuthBase<TAccount>, "db"> &
-    FastifyCacheOptions;
+type FastifyAuthOptions<TAccount extends AuthAccount> = Omit<FastifyAuthBase<TAccount>, "db">;
 
 type DbAccount<TDb> = TDb extends DbAdapter<infer TAccount> ? TAccount : never;
 
@@ -125,17 +114,16 @@ export const createFastifyAdapter = <TAccount extends AuthAccount>({
             response.header("Set-Cookie", value);
         },
         auth,
-        ...(cache === undefined ? {} : { cache }),
-        ...(cookie === undefined ? {} : { cookie }),
+        secret,
         framework: "Fastify",
+        getMethod: (request) => request.method,
         getHeader: ({ name, request }) => {
             const value = request.headers[name];
-
             return Array.isArray(value) ? value[0] : value;
         },
         ...(getIp === undefined ? {} : { getIp }),
-        getMethod: (request) => request.method,
-        ...(secret === undefined ? {} : { secret }),
+        ...(cache === undefined ? {} : { cache }),
+        ...(cookie === undefined ? {} : { cookie }),
     });
 
     const resolveSession = ({
@@ -217,10 +205,10 @@ const createFastifyAuthImpl = <TAccount extends AuthAccount, TData = undefined>(
     });
     const adapter = createFastifyAdapter({
         auth,
+        secret,
         ...(cache === undefined ? {} : { cache }),
         ...(cookie === undefined ? {} : { cookie }),
         ...(getIp === undefined ? {} : { getIp }),
-        ...(secret === undefined ? {} : { secret }),
     });
 
     if (social === undefined) {

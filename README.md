@@ -12,7 +12,7 @@ Database-backed password authentication, opaque browser sessions, and optional s
 | bcrypt password hashing        |   ✅    | Opt-in              |
 | Opaque server-side sessions    |   ✅    | Enabled             |
 | Database-backed validation     |   ✅    | Enabled             |
-| Sliding session renewal        |   ✅    | Every 24 hours      |
+| Automatic sliding renewal      |   ✅    | Every 24 hours      |
 | Absolute session lifetime      |   ✅    | 30 days             |
 | Signed browser cache           |   ✅    | Disabled            |
 | Full User-Agent validation     |   ✅    | Enabled             |
@@ -35,11 +35,11 @@ Database-backed password authentication, opaque browser sessions, and optional s
 | OTP and transactional email    |   ❌    | Application-owned   |
 | Route roles and permissions    |   ❌    | Application-owned   |
 
-“Session renewal” extends the existing session expiry when activity continues. It is not a refresh-token flow and does not rotate the opaque browser token.
+“Session renewal” extends the existing session expiry when authenticated activity continues. Framework middleware performs it inline when due. It is not a refresh-token flow and does not rotate the opaque browser token.
 
 ## Quick start
 
-The application defines its credential login, renewal, logout, and protected endpoints. Optional addons are configured separately after this base setup.
+The application defines its credential login, logout, protected endpoints, and the optional explicit renewal endpoint used by server-rendered frontends. Optional addons are configured separately after this base setup.
 
 ### 1. Install the package
 
@@ -147,6 +147,14 @@ export const authDb = createDrizzleAdapter({
 
 This Hono example is identical for Prisma and Drizzle:
 
+Generate one high-entropy API secret and keep it server-side:
+
+```bash
+openssl rand -base64 48
+```
+
+Store the result as `AUTH_SECRET` in the API environment. Do not expose it through a public frontend variable.
+
 ```ts
 import { createHonoAuth } from "@gauts/auth/hono";
 
@@ -154,6 +162,7 @@ import { authDb } from "./authDb.js";
 
 export const auth = createHonoAuth({
     db: authDb,
+    secret: process.env.AUTH_SECRET!,
 });
 ```
 
@@ -166,7 +175,7 @@ renewal        every 24 hours
 max lifetime   30 days
 validation     User-Agent
 cache          disabled
-cookies        __ses, __cac, __ren
+cookies        __ses, __ctx
 ```
 
 Mount the application-owned login routes and the package middleware:
@@ -274,7 +283,7 @@ export const proxy = async (request: NextRequest) => {
 };
 ```
 
-The application owns the redirect URL. When `unauthorizedUrl` is provided, the adapter creates the redirect and copies every API `Set-Cookie` header to it before returning the final response. The frontend does not receive `AUTH_SECRET`; the API remains responsible for session validation.
+The application owns the redirect URL. When `unauthorizedUrl` is provided, the adapter creates the redirect and copies every API `Set-Cookie` header to it before returning the final response. The frontend does not receive `AUTH_SECRET`; it reads only untrusted scheduling dates from `__ctx`. The API verifies the signature and remains responsible for session validation.
 
 ## Requirements and package entry points
 
@@ -311,7 +320,7 @@ The application owns the redirect URL. When `unauthorizedUrl` is provided, the a
 | `session`  | `SessionConfig`       |            ❌            | Session defaults  | Expiry, renewal, and client validation configuration.                                               |
 | `cookie`   | `HonoCookieConfig`    |            ❌            | Cookie defaults   | Names, domain, path, SameSite, and Secure settings.                                                 |
 | `cache`    | `{ ttl: number }`     |            ❌            | Disabled          | Enables the short signed browser cache.                                                             |
-| `secret`   | `string`              | With `cache` or `social` | —                 | HMAC secret for signed authentication data. Minimum 32 UTF-8 bytes.                                 |
+| `secret`   | `string`              |            ✅            | —                 | HMAC secret for signed session context and optional social data. Minimum 32 UTF-8 bytes.             |
 | `social`   | `SocialConfig`        |            ❌            | Disabled          | Enables configured social providers, redirects, and optional registration.                          |
 
 ```ts
@@ -404,17 +413,16 @@ renew_at     = min((updated_at ?? created_at) + renewInterval, maxExpiresAt)
 
 ### Cookies
 
-| Property      | Type / allowed values         | Default           | Description                                                               |
-| ------------- | ----------------------------- | ----------------- | ------------------------------------------------------------------------- |
-| `sessionName` | Valid cookie name             | `"__ses"`         | Contains the opaque token. This is the only authenticating cookie.        |
-| `cacheName`   | Valid cookie name             | `"__cac"`         | Contains the optional signed short cache.                                 |
-| `renewName`   | Valid cookie name             | `"__ren"`         | Contains the untrusted `renew_at` Unix timestamp.                         |
-| `domain`      | `string`                      | Browser host only | Optional cookie domain.                                                   |
-| `path`        | String beginning with `/`     | `"/"`             | Cookie path.                                                              |
-| `sameSite`    | `"Strict" \| "Lax" \| "None"` | `"Lax"`           | Browser SameSite policy.                                                  |
-| `secure`      | `boolean`                     | `true`            | Requires HTTPS when enabled. Set `false` only for local HTTP development. |
+| Property      | Type / allowed values         | Default           | Description                                                                                   |
+| ------------- | ----------------------------- | ----------------- | --------------------------------------------------------------------------------------------- |
+| `sessionName` | Valid cookie name             | `"__ses"`         | Contains the opaque token. This is the only authenticating cookie.                            |
+| `contextName` | Valid cookie name             | `"__ctx"`         | Contains signed renewal scheduling and the optional short cache. It never authenticates alone. |
+| `domain`      | `string`                      | Browser host only | Optional cookie domain.                                                                       |
+| `path`        | String beginning with `/`     | `"/"`             | Cookie path.                                                                                  |
+| `sameSite`    | `"Strict" \| "Lax" \| "None"` | `"Lax"`           | Browser SameSite policy.                                                                      |
+| `secure`      | `boolean`                     | `true`            | Requires HTTPS when enabled. Set `false` only for local HTTP development.                     |
 
-All three cookies are always `HttpOnly` and expire with their respective server-side purpose. Their names must be unique.
+Both cookies are always `HttpOnly`, expire with the authoritative session, and must use unique names. Deleting `__ctx` does not log the user out: the next authenticated API request validates `__ses` through the database and rebuilds the signed context. Deleting `__ses` ends browser authentication because `__ctx` is never accepted on its own.
 
 Cookie prefix rules are enforced:
 
@@ -434,53 +442,50 @@ The resolved names are available through:
 
 ```ts
 auth.cookie.sessionName; // "__ses"
-auth.cookie.cacheName; // "__cac"
-auth.cookie.renewName; // "__ren"
+auth.cookie.contextName; // "__ctx"
 ```
 
-### Signed cache
+### Signed session context
 
-| Property    | Type / allowed values               | Default  | Description                                               |
-| ----------- | ----------------------------------- | -------- | --------------------------------------------------------- |
-| `cache.ttl` | Integer `1` to `session.ttl`        | Disabled | Maximum cache lifetime in seconds.                        |
-| `secret`    | String with at least 32 UTF-8 bytes | —        | Signs the cache with HMAC-SHA-256. Required with `cache`. |
+| Property    | Type / allowed values               | Default  | Description                                                        |
+| ----------- | ----------------------------------- | -------- | ------------------------------------------------------------------ |
+| `secret`    | String with at least 32 UTF-8 bytes | Required | Signs `__ctx` with HMAC-SHA-256 and binds it to the opaque token.  |
+| `cache.ttl` | Integer `1` to `session.ttl`        | Disabled | Enables cached account/session data for at most this many seconds. |
 
-The cache:
+The signed context always contains the session expiry and next renewal time. When caching is configured, it may also contain the selected account and session data. The context:
 
-- is cryptographically bound to the opaque token and client identity;
-- is accepted only for `GET` and `HEAD`;
-- never extends the authoritative database session;
-- is bypassed for unsafe methods, renewal, logout, WebSockets, and core calls;
-- falls back to normal database authentication when absent, expired, malformed, or altered.
+- is cryptographically bound to `__ses` and cannot authenticate without it;
+- is verified by the API before any cached data is trusted;
+- exposes untrusted `renew` and `exp` scheduling values to the Next.js adapter without exposing `AUTH_SECRET`;
+- uses cached data only for `GET` and `HEAD`;
+- never extends the authoritative database session by itself;
+- bypasses cached data for unsafe methods, renewal, logout, WebSockets, and core calls;
+- triggers normal database authentication and a fresh signed context when absent, expired, malformed, altered, or bound to another token.
 
-The cache is signed but not encrypted. Do not place passwords, password hashes, raw session tokens, or application secrets in account/session data.
+The context is signed but not encrypted. Do not place passwords, password hashes, raw session tokens, or application secrets in selected account/session data.
 
 <details>
-<summary>Internal compact cache payload</summary>
+<summary>Internal signed context payload</summary>
 
 ```ts
 {
-    exp: cacheExpiresAt,
-    acc: {
-        id,
-        email,
-        name,
-        role,
-        status,
-        timezone,
-        user: { id, role, status },
-    },
-    ses: {
-        id,
-        client: { ip, agent, platform },
-        created_at,
-        exp: expiresAt,
-        ren: renewAt,
-    },
+    cache: {
+        data: {
+            account,
+            session: {
+                client,
+                created,
+                id,
+            },
+        },
+        exp: cacheExpiresAt,
+    } | null,
+    exp: sessionExpiresAt,
+    renew: renewAt,
 }
 ```
 
-`session.account_id` is reconstructed from `acc.id` after signature validation.
+The payload is encoded as `base64url(payload).signature`. The Next.js adapter may decode `exp` and `renew` only as scheduling hints. The API verifies the signature against the current opaque token before using any value. `session.account_id` is reconstructed from `account.id` after verification.
 
 </details>
 
@@ -623,6 +628,7 @@ export const auth = createHonoAuth({
             users: { table: users },
         },
     }),
+    secret: process.env.AUTH_SECRET!,
 });
 ```
 
@@ -678,11 +684,11 @@ export const nextAuth = createNextAuth({
 });
 ```
 
-| Property             | Type / allowed values            | Required | Default   | Description                                   |
-| -------------------- | -------------------------------- | :------: | --------- | --------------------------------------------- |
-| `renewUrl`           | Absolute `http:` or `https:` URL |    ✅    | —         | Trusted private API renewal endpoint.         |
-| `cookie.sessionName` | Valid cookie name                |    ❌    | `"__ses"` | Session cookie read and forwarded to the API. |
-| `cookie.renewName`   | Valid cookie name                |    ❌    | `"__ren"` | Renewal scheduling cookie read by Next.js.    |
+| Property             | Type / allowed values            | Required | Default   | Description                                              |
+| -------------------- | -------------------------------- | :------: | --------- | -------------------------------------------------------- |
+| `renewUrl`           | Absolute `http:` or `https:` URL |    ✅    | —         | Trusted private API renewal endpoint.                    |
+| `cookie.sessionName` | Valid cookie name                |    ❌    | `"__ses"` | Session cookie read and forwarded to the API.            |
+| `cookie.contextName` | Valid cookie name                |    ❌    | `"__ctx"` | Signed context decoded only to schedule SSR renewal.     |
 
 ## Session flow
 
@@ -695,8 +701,8 @@ credentials accepted
     -> load current account and owning user
     -> apply configured account/user access rules
     -> write __ses
-    -> write __ren
-    -> optionally write __cac
+    -> write signed __ctx with renewal schedule
+    -> optionally include short cached data inside __ctx
 ```
 
 Only the raw browser token authenticates. The database stores only its SHA-256 hash.
@@ -704,11 +710,15 @@ Only the raw browser token authenticates. The database stores only its SHA-256 h
 ### Protected `GET` or `HEAD`
 
 ```text
-session token
-    -> valid signed cache?
-        -> yes: expose cached account and session
-        -> no: validate through DB and create a fresh cache
+__ses + __ctx
+    -> renewal due?
+        -> yes: validate and renew through DB, then write both cookies
+        -> no: valid signed cache?
+            -> yes: expose cached account and session
+            -> no: validate through DB and write a fresh signed context
 ```
+
+Renewal happens inside the same protected API request. A client-side fetch does not need a second renewal request.
 
 ### Unsafe request
 
@@ -717,22 +727,22 @@ session token
     -> SHA-256 hash
     -> indexed DB lookup
     -> validate expiry, revocation, account/user access, and client
-    -> clear short cache
+    -> write signed context without cached account data
     -> continue
 ```
 
-### Renewal
+### Next.js SSR renewal
 
 ```text
-Next reads __ren
-    -> future timestamp: no API request
+Next decodes renew and exp from __ctx as untrusted hints
+    -> future timestamps: no renewal request
     -> missing, invalid, or due: POST /auth/renew
     -> API validates through DB
     -> update expires_at when renewal is due
-    -> Set-Cookie with the same token, new renewAt, and fresh cache
+    -> Set-Cookie with the same token and fresh signed context
 ```
 
-`auth.session.resolve()` is always DB-backed and read-only. Only explicit renewal updates database expiry.
+`auth.session.resolve()` is always DB-backed and read-only. `auth.session.renew()` performs the authoritative renewal. Framework `requireSession` calls it automatically when the verified context says renewal is due; the explicit endpoint gives Next.js the same behavior during SSR navigation.
 
 ## Hono adapter
 
@@ -793,7 +803,7 @@ await auth.createSession({
 | Method                                                  | Purpose                                                                                           |
 | ------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
 | `auth.createSession({ account_id, context, country? })` | Creates the DB session and writes the browser cookies. `country` is optional login-time metadata. |
-| `auth.resolveSession(context)`                          | Resolves a request and returns the selected account and session.                                  |
+| `auth.resolveSession(context)`                          | Resolves a request, renews inline when due, and returns the selected account and session.          |
 | `auth.renewSession(context)`                            | Performs DB validation, renews when due, and writes authoritative cookies.                        |
 | `auth.revokeSession(context)`                           | Revokes the current DB session and clears cookies.                                                |
 | `auth.clearSession(context)`                            | Clears browser cookies without revoking the DB session.                                           |
@@ -807,7 +817,7 @@ await auth.createSession({
 ```ts
 import { createExpressAuth, type ExpressAuthLocals } from "@gauts/auth/express";
 
-const auth = createExpressAuth({ db });
+const auth = createExpressAuth({ db, secret: process.env.AUTH_SECRET! });
 
 app.get("/account", auth.requireSession, (_request, response) => {
     const { account, session, user } = response.locals as ExpressAuthLocals;
@@ -818,7 +828,7 @@ app.get("/account", auth.requireSession, (_request, response) => {
 | Method                                                            | Purpose                                              |
 | ----------------------------------------------------------------- | ---------------------------------------------------- |
 | `auth.createSession({ account_id, request, response, country? })` | Creates the DB session and writes cookies.           |
-| `auth.resolveSession({ request, response })`                      | Resolves the selected account and session.           |
+| `auth.resolveSession({ request, response })`                      | Resolves and automatically renews when due.           |
 | `auth.renewSession({ request, response })`                        | Renews when due and writes authoritative cookies.    |
 | `auth.revokeSession({ request, response })`                       | Revokes the current session and clears cookies.      |
 | `auth.clearSession(response)`                                     | Clears cookies without revoking the DB session.      |
@@ -834,7 +844,7 @@ Register the request decorators once before declaring routes:
 ```ts
 import { createFastifyAuth } from "@gauts/auth/fastify";
 
-const auth = createFastifyAuth({ db });
+const auth = createFastifyAuth({ db, secret: process.env.AUTH_SECRET! });
 
 auth.decorate(app);
 
@@ -849,7 +859,7 @@ app.get("/account", { preHandler: auth.requireSession }, (request) => ({
 | -------------------------------------------------------------- | -------------------------------------------------------------- |
 | `auth.decorate(app)`                                           | Declares the native request decorators once at startup.        |
 | `auth.createSession({ account_id, request, reply, country? })` | Creates the DB session and writes cookies.                     |
-| `auth.resolveSession({ request, reply })`                      | Resolves the selected account and session.                     |
+| `auth.resolveSession({ request, reply })`                      | Resolves and automatically renews when due.                     |
 | `auth.renewSession({ request, reply })`                        | Renews when due and writes authoritative cookies.              |
 | `auth.revokeSession({ request, reply })`                       | Revokes the current session and clears cookies.                |
 | `auth.clearSession(reply)`                                     | Clears cookies without revoking the DB session.                |
@@ -1187,12 +1197,13 @@ import { createHonoAdapter } from "@gauts/auth/hono";
 const core = createAuth({ db });
 const hono = createHonoAdapter({
     auth: core,
+    secret: process.env.AUTH_SECRET!,
 });
 ```
 
 ## Next.js adapter
 
-The Next.js adapter schedules renewal; it does not authenticate pages or API requests.
+The Next.js adapter schedules SSR renewal; it does not authenticate pages or API requests. Normal API middleware independently verifies `__ctx` and renews inline, including requests made directly by client-side SWR or `fetch`.
 
 ```ts
 import type { NextRequest } from "next/server";
@@ -1218,13 +1229,13 @@ Result values:
 
 | `attempted` |    `status` | Meaning                                                         |
 | :---------: | ----------: | --------------------------------------------------------------- |
-|   `false`   |      `null` | Session token exists and renewal is not due.                    |
+|   `false`   |      `null` | Session token and context schedule exist; renewal is not due.   |
 |   `false`   |       `401` | Session token is missing or malformed; no API request occurred. |
 |   `true`    | HTTP status | The renewal endpoint was called and returned this status.       |
 
 `unauthorizedUrl` is optional. When provided, the adapter redirects a `401` to that relative or absolute URL and transfers every returned `Set-Cookie` header to the redirect. Without it, the original response is returned with `status: 401` as before.
 
-The adapter forwards only the session cookie and controlled client/origin headers required by the private API. Other cookies, authorization headers, and arbitrary headers are not forwarded.
+The adapter forwards only the session cookie and controlled client/origin headers required by the private API. `__ctx` is not forwarded because the API renewal endpoint always validates the opaque token through the database and returns a new signed context. Other cookies, authorization headers, and arbitrary headers are not forwarded.
 
 `buildForwardHeaders()` and `FORWARD_HEADERS` are exported from `@gauts/auth/next` for application fetchers that need the same controlled forwarding rules:
 
@@ -1241,7 +1252,7 @@ Safe client and proxy metadata is copied by default. Credentials such as `cookie
 
 When `Origin` is absent and trusted `X-Forwarded-Proto` and `X-Forwarded-Host` headers exist, the adapter reconstructs the public origin from them. It never derives a public origin from the internal Next.js request URL. The deployment proxy must overwrite forwarded headers received from untrusted clients.
 
-Apply renewal only to protected routes or skip public routes before calling `nextAuth.renew()`.
+Apply renewal only to protected routes or skip public routes before calling `nextAuth.renew()`. The adapter calls the API only when `__ctx` is missing, malformed, expired, or its decoded renewal time is due. Those decoded dates are untrusted scheduling hints; they never authenticate the request.
 
 ## Core session API
 
@@ -1306,9 +1317,9 @@ The Prisma and Drizzle adapters implement both `DbAdapter` and `SocialDbAdapter`
 
 The package contains no Redis or in-process cache.
 
-Without the optional browser cache, each `requireSession` performs an indexed database lookup through `account_sessions.token_hash`.
+Without the optional browser cache, each `requireSession` performs an indexed database lookup through `account_sessions.token_hash`. When renewal is due, that same request also updates the authoritative expiry and returns refreshed cookies; there is no additional client-side API call.
 
-With a valid cache, `GET` and `HEAD` skip the lookup until `cache.ttl` expires. Unsafe methods always use current database state.
+With valid cached data inside `__ctx`, `GET` and `HEAD` skip the lookup until `cache.ttl` expires. Unsafe methods always use current database state. Renewal still validates through the database even if cached data is present.
 
 The tradeoff is explicit: revocation and selected account or relation changes made elsewhere may remain visible to safe cached requests until the short TTL expires. A 60-second TTL limits this stale-read window to one minute. Disable cache when immediate read revocation is required.
 
@@ -1360,7 +1371,6 @@ The package provides authentication primitives, not a complete application secur
 - TLS and trusted-proxy configuration;
 - CSRF, CORS, host, and origin validation;
 - login and renewal rate limiting;
-- equivalent password verification work for unknown accounts;
 - route roles and authorization;
 - re-authentication for sensitive operations;
 - database migrations and session cleanup;

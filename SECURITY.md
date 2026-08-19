@@ -29,19 +29,23 @@ Security reports may cover the password service, session core, database adapters
 
 Application-specific authorization, rate limiting, CSRF, CORS, proxy trust, deployment, and database access policies remain the consuming application's responsibility unless the vulnerability is caused by package behavior.
 
-## Signed session cache
+## Signed session context
 
-The optional browser cache is disabled when omitted. When configured, it is accepted only for `GET` and `HEAD` requests and is signed with HMAC-SHA-256 using an application-provided secret of at least 32 bytes.
+Browser integration uses an opaque session-token cookie and a signed context cookie. The context is signed with HMAC-SHA-256 using an API-only application secret of at least 32 bytes and is cryptographically bound to the opaque token. It contains session expiry and renewal scheduling plus optional short cached account/session data. It never authenticates without the opaque token.
 
-The cache is bound to the opaque session token, its own expiry, the authoritative session expiry, and the configured client fields. Invalid cache data never authenticates a request; it causes normal database validation.
+The API verifies the context signature before trusting any cached value. Missing, malformed, expired, altered, or incorrectly bound context data causes normal database validation and a new context cookie. It does not revoke an otherwise valid opaque session. The Next.js adapter may decode the expiry and renewal values without the secret, but treats them only as untrusted scheduling hints.
+
+The optional browser cache is disabled when omitted. When configured, it is accepted only for `GET` and `HEAD` requests and remains bound to its own expiry, the authoritative session expiry, and the configured client fields.
 
 Cookie caching introduces a bounded consistency window. A session revoked on another device, or selected account or relation access changed in the database, may remain readable until the cache TTL expires. Unsafe methods, renewal, logout, WebSockets, and direct core calls always validate through the database. Applications requiring immediate cross-device read revocation must leave the cache disabled or provide shared server-side enforcement outside this package.
 
-Keep `AUTH_SECRET` in the API environment. Do not expose it to browser code or share it with a frontend merely to inspect the renewal timestamp. The timestamp is intentionally untrusted and never authenticates or renews a session by itself.
+Keep `AUTH_SECRET` in the API environment. Do not expose it to browser code or share it with a frontend merely to inspect scheduling values. Those values are intentionally untrusted and never authenticate or renew a session by themselves.
 
 ## Session lifetime
 
 Sliding renewal is limited by `session.maxLifetime`, which defaults to 30 days from the original login. The maximum expiry is derived from the immutable session `created_at` value and enforced by the core during resolution and renewal. Browser cookies and cached session data never outlive the authoritative session expiry.
+
+Framework middleware renews inline when the verified context says renewal is due. The explicit renewal endpoint performs the same database-backed operation for server-rendered navigation. Both paths retain the same opaque token and rewrite the session and context cookie expiries.
 
 Activity and possession of the session token cannot extend this absolute limit. After it is reached, the user must authenticate again and receive a new session token.
 

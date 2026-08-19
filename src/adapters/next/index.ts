@@ -1,14 +1,11 @@
 import { NextResponse, type NextRequest } from "next/server.js";
 
 import { createError } from "../../errors.js";
-import {
-    parseRenewAt,
-    parseSessionToken,
-    resolveSessionCookieNames,
-} from "../../session/cookie.js";
+import { parseSessionToken, resolveSessionCookieNames } from "../../session/cookie.js";
+import { parseSessionState } from "../../session/state.js";
 
 export type NextCookieConfig = {
-    renewName?: string;
+    contextName?: string;
     sessionName?: string;
 };
 
@@ -163,9 +160,14 @@ export const createNextAuth = ({ cookie, renewUrl }: NextAuthConfig): NextAuth =
                 };
             }
 
-            const renewAt = parseRenewAt(request.cookies.get(names.renewName)?.value);
+            const state = parseSessionState(request.cookies.get(names.contextName)?.value);
+            const current = Date.now();
 
-            if (renewAt !== null && renewAt > Math.floor(Date.now() / 1000)) {
+            if (
+                state &&
+                state.expires_at.getTime() > current &&
+                state.renew_at.getTime() > current
+            ) {
                 return {
                     attempted: false,
                     response,

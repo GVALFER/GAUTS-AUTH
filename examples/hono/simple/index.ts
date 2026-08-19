@@ -10,10 +10,11 @@ type LoginAccount = {
 type SimpleDeps = {
     db: DbAdapter;
     findAccount: (email: string) => Promise<LoginAccount | null>;
+    secret: string;
 };
 
-export const createApp = ({ db, findAccount }: SimpleDeps) => {
-    const auth = createHonoAuth({ db });
+export const createApp = ({ db, findAccount, secret }: SimpleDeps) => {
+    const auth = createHonoAuth({ db, secret });
     const app = new Hono<HonoAuthEnv>();
 
     app.onError((error, c) => {

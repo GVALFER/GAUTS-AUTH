@@ -56,9 +56,8 @@ export const createApp = (deps: AdvancedDeps) => {
     const auth = createHonoAuth({
         cache: { ttl: 60 },
         cookie: {
-            cacheName: "__app_cac",
+            contextName: "__app_ctx",
             ...(deps.cookieDomain ? { domain: deps.cookieDomain } : {}),
-            renewName: "__app_ren",
             sameSite: "Lax",
             secure: deps.secure,
             sessionName: "__app_ses",

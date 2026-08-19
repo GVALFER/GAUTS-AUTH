@@ -10,11 +10,25 @@ import { isAuthError } from "../src/errors.js";
 
 const token = "a".repeat(43);
 
-const createRequest = ({
+const createContext = ({
+    expiresAt = Math.floor(Date.now() / 1000) + 3_600,
     renewAt = Math.floor(Date.now() / 1000) + 60,
-}: { renewAt?: number | string | null } = {}) => {
+}: {
+    expiresAt?: number;
+    renewAt?: number;
+} = {}) => {
+    const body = Buffer.from(
+        JSON.stringify({ cache: null, exp: expiresAt, renew: renewAt }),
+    ).toString("base64url");
+
+    return `${body}.${"s".repeat(43)}`;
+};
+
+const createRequest = ({
+    context = createContext(),
+}: { context?: string | null } = {}) => {
     const cookies = [`other=private`, `session=${token}`];
-    if (renewAt !== null) cookies.push(`session-renew=${String(renewAt)}`);
+    if (context !== null) cookies.push(`session-context=${context}`);
 
     return new NextRequest("https://admin.example.com/account", {
         headers: {
@@ -78,7 +92,7 @@ describe("Next adapter", () => {
         assert.equal(headers.get("x-private-header"), null);
     });
 
-    it("does not call the renewal endpoint before renewAt", async () => {
+    it("does not call the renewal endpoint before the signed context schedule", async () => {
         const originalFetch = globalThis.fetch;
         let calls = 0;
         globalThis.fetch = async () => {
@@ -88,7 +102,7 @@ describe("Next adapter", () => {
 
         try {
             const auth = createNextAuth({
-                cookie: { renewName: "session-renew", sessionName: "session" },
+                cookie: { contextName: "session-context", sessionName: "session" },
                 renewUrl: "https://api.example.com/auth/renew",
             });
             const result = await auth.renew({
@@ -104,7 +118,7 @@ describe("Next adapter", () => {
         }
     });
 
-    it("renews when renewAt is missing and forwards every Set-Cookie", async () => {
+    it("renews when session context is missing and forwards every Set-Cookie", async () => {
         const originalFetch = globalThis.fetch;
         let request: Parameters<typeof fetch>[0] | undefined;
         let init: RequestInit | undefined;
@@ -113,18 +127,18 @@ describe("Next adapter", () => {
             init = options;
             const headers = new Headers();
             headers.append("Set-Cookie", "session=updated; Path=/; HttpOnly");
-            headers.append("Set-Cookie", "session-renew=1786968000; Path=/; HttpOnly");
+            headers.append("Set-Cookie", "session-context=updated; Path=/; HttpOnly");
 
             return new Response(null, { headers, status: 204 });
         };
 
         try {
             const auth = createNextAuth({
-                cookie: { renewName: "session-renew", sessionName: "session" },
+                cookie: { contextName: "session-context", sessionName: "session" },
                 renewUrl: "https://api.example.com/auth/renew",
             });
             const result = await auth.renew({
-                request: createRequest({ renewAt: null }),
+                request: createRequest({ context: null }),
                 response: NextResponse.next(),
             });
 
@@ -150,7 +164,7 @@ describe("Next adapter", () => {
             ).getSetCookie();
             assert.deepEqual(setCookies, [
                 "session=updated; Path=/; HttpOnly",
-                "session-renew=1786968000; Path=/; HttpOnly",
+                "session-context=updated; Path=/; HttpOnly",
             ]);
         } finally {
             globalThis.fetch = originalFetch;
@@ -162,18 +176,18 @@ describe("Next adapter", () => {
         globalThis.fetch = async () => {
             const headers = new Headers();
             headers.append("Set-Cookie", "session=; Max-Age=0; Path=/; HttpOnly");
-            headers.append("Set-Cookie", "session-renew=; Max-Age=0; Path=/; HttpOnly");
+            headers.append("Set-Cookie", "session-context=; Max-Age=0; Path=/; HttpOnly");
 
             return new Response(null, { headers, status: 401 });
         };
 
         try {
             const auth = createNextAuth({
-                cookie: { renewName: "session-renew", sessionName: "session" },
+                cookie: { contextName: "session-context", sessionName: "session" },
                 renewUrl: "https://api.example.com/auth/renew",
             });
             const result = await auth.renew({
-                request: createRequest({ renewAt: null }),
+                request: createRequest({ context: null }),
                 response: NextResponse.next(),
                 unauthorizedUrl: "/auth/login",
             });
@@ -193,7 +207,7 @@ describe("Next adapter", () => {
                 ).getSetCookie(),
                 [
                     "session=; Max-Age=0; Path=/; HttpOnly",
-                    "session-renew=; Max-Age=0; Path=/; HttpOnly",
+                    "session-context=; Max-Age=0; Path=/; HttpOnly",
                 ],
             );
         } finally {
@@ -211,7 +225,7 @@ describe("Next adapter", () => {
 
         try {
             const auth = createNextAuth({
-                cookie: { renewName: "session-renew", sessionName: "session" },
+                cookie: { contextName: "session-context", sessionName: "session" },
                 renewUrl: "http://api:4002/auth/renew",
             });
             const request = new NextRequest("https://0.0.0.0:4001/account", {
@@ -245,7 +259,7 @@ describe("Next adapter", () => {
 
         try {
             const auth = createNextAuth({
-                cookie: { renewName: "session-renew", sessionName: "session" },
+                cookie: { contextName: "session-context", sessionName: "session" },
                 renewUrl: "http://api:4002/auth/renew",
             });
             const request = new NextRequest("https://0.0.0.0:4001/account", {
@@ -266,7 +280,7 @@ describe("Next adapter", () => {
         }
     });
 
-    it("renews when renewAt is expired or invalid", async () => {
+    it("renews when context scheduling is expired or invalid", async () => {
         const originalFetch = globalThis.fetch;
         let calls = 0;
         globalThis.fetch = async () => {
@@ -276,13 +290,22 @@ describe("Next adapter", () => {
 
         try {
             const auth = createNextAuth({
-                cookie: { renewName: "session-renew", sessionName: "session" },
+                cookie: { contextName: "session-context", sessionName: "session" },
                 renewUrl: "https://api.example.com/auth/renew",
             });
 
-            for (const renewAt of [Math.floor(Date.now() / 1000) - 1, "invalid", "0"]) {
+            const current = Math.floor(Date.now() / 1000);
+            const contexts = [
+                createContext({ renewAt: current - 1 }),
+                "invalid",
+                createContext({ renewAt: 0 }),
+                createContext({ expiresAt: current - 1, renewAt: current + 60 }),
+                createContext({ expiresAt: current + 60, renewAt: current + 120 }),
+            ];
+
+            for (const context of contexts) {
                 const result = await auth.renew({
-                    request: createRequest({ renewAt }),
+                    request: createRequest({ context }),
                     response: NextResponse.next(),
                 });
 
@@ -290,7 +313,7 @@ describe("Next adapter", () => {
                 assert.equal(result.status, 204);
             }
 
-            assert.equal(calls, 3);
+            assert.equal(calls, contexts.length);
         } finally {
             globalThis.fetch = originalFetch;
         }
@@ -298,7 +321,7 @@ describe("Next adapter", () => {
 
     it("reports a missing or malformed session cookie without calling the API", async () => {
         const auth = createNextAuth({
-            cookie: { renewName: "session-renew", sessionName: "session" },
+            cookie: { contextName: "session-context", sessionName: "session" },
             renewUrl: "https://api.example.com/auth/renew",
         });
         const missing = await auth.renew({
@@ -336,7 +359,7 @@ describe("Next adapter", () => {
         assert.throws(
             () =>
                 createNextAuth({
-                    cookie: { renewName: "session", sessionName: "session" },
+                    cookie: { contextName: "session", sessionName: "session" },
                     renewUrl: "https://api.example.com/auth/renew",
                 }),
             (error) => isAuthError(error) && error.code === "AUTH_CONFIG_INVALID",

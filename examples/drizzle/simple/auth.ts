@@ -9,7 +9,13 @@ type Schema = {
     users: typeof users;
 };
 
-export const createAuth = (client: MySql2Database<Schema>) => {
+export const createAuth = ({
+    client,
+    secret,
+}: {
+    client: MySql2Database<Schema>;
+    secret: string;
+}) => {
     return createHonoAuth({
         db: createDrizzleAdapter({
             client,
@@ -19,5 +25,6 @@ export const createAuth = (client: MySql2Database<Schema>) => {
                 users: { table: users },
             },
         }),
+        secret,
     });
 };

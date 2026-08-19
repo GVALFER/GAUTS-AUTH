@@ -1,7 +1,11 @@
 import type { SessionClientInput } from "../../client/index.js";
 import { createError, isAuthError } from "../../errors.js";
-import { createSessionCache, type SessionCache } from "../../session/cache.js";
-import { formatRenewAt, parseSessionToken } from "../../session/cookie.js";
+import { parseSessionToken } from "../../session/cookie.js";
+import {
+    createSessionState,
+    type ResolvedSessionState,
+    type SessionState,
+} from "../../session/state.js";
 import type { AuthAccount, ResolvedSession } from "../../session/types.js";
 import { createCookieHeader, getCookieValue, resolveHttpCookie } from "./cookie.js";
 import type { HttpRequestInput, HttpSessionAdapter, HttpSessionConfig } from "./types.js";
@@ -20,15 +24,22 @@ type SetCookieInput<TResponse> = {
     value: string;
 };
 
-type SetSessionInput<TResponse, TAccount extends AuthAccount> = {
+type SetSessionInput<TResponse> = {
+    expires_at: Date;
     response: TResponse;
-    session: ResolvedSession<TAccount>["session"];
     token: string;
 };
 
-type SetCacheInput<TResponse, TAccount extends AuthAccount> = {
+type SetStateInput<TResponse, TAccount extends AuthAccount> = {
+    cache?: boolean;
     response: TResponse;
     session: ResolvedSession<TAccount>;
+    token: string;
+};
+
+type GetStateInput<TRequest> = {
+    client: SessionClientInput;
+    request: TRequest;
     token: string;
 };
 
@@ -64,22 +75,11 @@ export const createHttpSession = <TRequest, TResponse, TAccount extends AuthAcco
     }
 
     const resolvedCookie = resolveHttpCookie(cookie);
-    let cacheService: SessionCache<TAccount> | null = null;
-
-    if (cache !== undefined) {
-        if (typeof secret !== "string") {
-            throw createError({
-                code: "AUTH_CONFIG_INVALID",
-                message: "Authentication secret is required when session cache is configured.",
-            });
-        }
-
-        cacheService = createSessionCache<TAccount>({
-            config: cache,
-            secret,
-            session: auth.config.session,
-        });
-    }
+    const stateService: SessionState<TAccount> = createSessionState({
+        secret,
+        session: auth.config.session,
+        ...(cache === undefined ? {} : { cache }),
+    });
 
     const getCookie = ({ name, request }: { name: string; request: TRequest }) => {
         const header = getHeader({ name: "cookie", request });
@@ -98,6 +98,18 @@ export const createHttpSession = <TRequest, TResponse, TAccount extends AuthAcco
 
     const getToken = (request: TRequest): string | null => {
         return parseSessionToken(getCookie({ name: resolvedCookie.names.sessionName, request }));
+    };
+
+    const getState = ({
+        client,
+        request,
+        token,
+    }: GetStateInput<TRequest>): ResolvedSessionState<TAccount> | null => {
+        return stateService.resolve({
+            client,
+            token,
+            value: getCookie({ name: resolvedCookie.names.contextName, request }),
+        });
     };
 
     const setCookie = ({
@@ -129,53 +141,38 @@ export const createHttpSession = <TRequest, TResponse, TAccount extends AuthAcco
         });
     };
 
-    const setSession = ({
-        response,
-        session,
-        token,
-    }: SetSessionInput<TResponse, TAccount>): void => {
+    const setSession = ({ expires_at, response, token }: SetSessionInput<TResponse>): void => {
         setCookie({
-            expires: session.expires_at,
+            expires: expires_at,
             name: resolvedCookie.names.sessionName,
             response,
             value: token,
         });
-        setCookie({
-            expires: session.expires_at,
-            name: resolvedCookie.names.renewName,
-            response,
-            value: formatRenewAt(session.renew_at),
-        });
     };
 
-    const setCache = ({
+    const setState = ({
+        cache: useCache,
         response,
         session,
         token,
-    }: SetCacheInput<TResponse, TAccount>): void => {
-        if (!cacheService) {
-            return;
-        }
-
-        const cached = cacheService.create({ resolved: session, token });
-        setCookie({
-            expires: cached.expires_at,
-            name: resolvedCookie.names.cacheName,
-            response,
-            value: cached.value,
+    }: SetStateInput<TResponse, TAccount>): void => {
+        const state = stateService.create({
+            resolved: session,
+            token,
+            ...(useCache === undefined ? {} : { cache: useCache }),
         });
-    };
 
-    const clearCache = (response: TResponse): void => {
-        if (cacheService) {
-            deleteCookie({ name: resolvedCookie.names.cacheName, response });
-        }
+        setCookie({
+            expires: state.expires_at,
+            name: resolvedCookie.names.contextName,
+            response,
+            value: state.value,
+        });
     };
 
     const clearSession = (response: TResponse): void => {
         deleteCookie({ name: resolvedCookie.names.sessionName, response });
-        deleteCookie({ name: resolvedCookie.names.cacheName, response });
-        deleteCookie({ name: resolvedCookie.names.renewName, response });
+        deleteCookie({ name: resolvedCookie.names.contextName, response });
     };
 
     const requireToken = ({ request, response }: HttpRequestInput<TRequest, TResponse>): string => {
@@ -220,6 +217,37 @@ export const createHttpSession = <TRequest, TResponse, TAccount extends AuthAcco
         return value;
     };
 
+    const renewDbSession = async ({
+        client,
+        response,
+        token,
+    }: ResolveDbSessionInput<TResponse>): Promise<ResolvedSession<TAccount>> => {
+        let value;
+
+        try {
+            value = await auth.session.renew({ client, token });
+        } catch (error) {
+            if (isAuthError(error) && error.code === "SESSION_CLIENT_MISMATCH") {
+                clearSession(response);
+            }
+
+            throw error;
+        }
+
+        if (!value) {
+            clearSession(response);
+            throw createError({
+                code: "SESSION_INVALID",
+                message: "Authentication required.",
+            });
+        }
+
+        return {
+            account: value.account,
+            session: value.session,
+        };
+    };
+
     const createSession: HttpSessionAdapter<
         TRequest,
         TResponse,
@@ -230,13 +258,14 @@ export const createHttpSession = <TRequest, TResponse, TAccount extends AuthAcco
             client: await getSessionClient(request),
             ...(country === undefined ? {} : { country }),
         });
+
         const value: ResolvedSession<TAccount> = {
             account: created.account,
             session: created.session,
         };
 
-        setSession({ response, session: created.session, token: created.token });
-        setCache({ response, session: value, token: created.token });
+        setSession({ expires_at: created.session.expires_at, response, token: created.token });
+        setState({ response, session: value, token: created.token });
         return created.session;
     };
 
@@ -248,25 +277,24 @@ export const createHttpSession = <TRequest, TResponse, TAccount extends AuthAcco
         const token = requireToken({ request, response });
         const client = await getSessionClient(request);
         const useCache = canUseCache(getMethod(request));
+        const state = getState({ client, request, token });
 
-        if (cacheService && useCache) {
-            const cached = cacheService.resolve({
-                client,
-                token,
-                value: getCookie({ name: resolvedCookie.names.cacheName, request }),
-            });
+        if (!state || state.renew_at.getTime() <= Date.now()) {
+            const value = await renewDbSession({ client, response, token });
 
-            if (cached) {
-                return cached;
-            }
+            setSession({ expires_at: value.session.expires_at, response, token });
+            setState({ cache: useCache, response, session: value, token });
+            return value;
+        }
+
+        if (useCache && state.cache) {
+            return state.cache;
         }
 
         const value = await resolveDbSession({ client, response, token });
 
-        if (cacheService && useCache) {
-            setCache({ response, session: value, token });
-        } else {
-            clearCache(response);
+        if (cache !== undefined) {
+            setState({ cache: useCache, response, session: value, token });
         }
 
         return value;
@@ -277,32 +305,15 @@ export const createHttpSession = <TRequest, TResponse, TAccount extends AuthAcco
         response,
     }) => {
         const token = requireToken({ request, response });
-        let renewed;
+        const value = await renewDbSession({
+            client: await getSessionClient(request),
+            response,
+            token,
+        });
 
-        try {
-            renewed = await auth.session.renew({
-                client: await getSessionClient(request),
-                token,
-            });
-        } catch (error) {
-            if (isAuthError(error) && error.code === "SESSION_CLIENT_MISMATCH") {
-                clearSession(response);
-            }
-
-            throw error;
-        }
-
-        if (!renewed) {
-            clearSession(response);
-            throw createError({
-                code: "SESSION_INVALID",
-                message: "Authentication required.",
-            });
-        }
-
-        setSession({ response, session: renewed.session, token });
-        setCache({ response, session: renewed, token });
-        return renewed.session;
+        setSession({ expires_at: value.session.expires_at, response, token });
+        setState({ response, session: value, token });
+        return value.session;
     };
 
     const revokeSession: HttpSessionAdapter<

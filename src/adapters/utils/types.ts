@@ -1,13 +1,12 @@
 import type { Auth } from "../../auth.js";
-import type { SessionCacheConfig } from "../../session/cache.js";
+import type { SessionCacheConfig } from "../../session/state.js";
 import type { SessionCookieNames } from "../../session/cookie.js";
 import type { AuthAccount, ResolvedSession, Session } from "../../session/types.js";
 
 export type HttpCookieConfig = {
-    cacheName?: string;
+    contextName?: string;
     domain?: string;
     path?: string;
-    renewName?: string;
     sameSite?: "Strict" | "Lax" | "None";
     secure?: boolean;
     sessionName?: string;
@@ -39,7 +38,7 @@ export type HttpSessionConfig<TRequest, TResponse, TAccount extends AuthAccount>
     getHeader: (input: { name: string; request: TRequest }) => string | undefined;
     getIp?: HttpGetIp<TRequest>;
     getMethod: (request: TRequest) => string;
-    secret?: string;
+    secret: string;
 };
 
 export type HttpCreateSessionInput<TRequest, TResponse> = {
@@ -64,10 +63,4 @@ export type HttpSessionAdapter<TRequest, TResponse, TAccount extends AuthAccount
         input: HttpRequestInput<TRequest, TResponse>,
     ): Promise<ResolvedSession<TAccount>>;
     revokeSession(input: HttpRequestInput<TRequest, TResponse>): Promise<string[]>;
-};
-
-export type HttpAuthContext<TAccount extends AuthAccount> = {
-    account: TAccount;
-    session: Session;
-    user: TAccount["user"];
 };

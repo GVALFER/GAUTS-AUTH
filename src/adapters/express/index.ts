@@ -1,7 +1,7 @@
 import type { Request, RequestHandler, Response } from "express";
 import { createAuth, type Auth, type AuthDeps } from "../../auth.js";
-import type { SessionCacheConfig } from "../../session/cache.js";
 import type { SessionCookieNames } from "../../session/cookie.js";
+import type { SessionCacheConfig } from "../../session/state.js";
 import type { AuthAccount, DbAdapter, ResolvedSession, Session } from "../../session/types.js";
 import type { SocialConfig, SocialDbAdapter } from "../../social/types.js";
 import { resolveHttpCookie } from "../utils/cookie.js";
@@ -10,7 +10,7 @@ import { createHttpSession } from "../utils/session.js";
 import type { HttpCookieConfig } from "../utils/types.js";
 import { createExpressSocial, type ExpressSocial } from "./social.js";
 
-export type { SessionCacheConfig } from "../../session/cache.js";
+export type { SessionCacheConfig } from "../../session/state.js";
 export type { ExpressSocial, ExpressSocialLocals } from "./social.js";
 
 export type ExpressAuthLocals<TAccount extends AuthAccount = AuthAccount> = {
@@ -25,34 +25,25 @@ export type ExpressGetIp = (
     request: Request,
 ) => Promise<string | null | undefined> | string | null | undefined;
 
-type ExpressCacheOptions =
-    | {
-          cache: SessionCacheConfig;
-          secret: string;
-      }
-    | {
-          cache?: undefined;
-          secret?: string;
-      };
-
 export type ExpressAdapterConfig<TAccount extends AuthAccount = AuthAccount> = {
     auth: Auth<TAccount>;
     cache?: SessionCacheConfig;
     cookie?: ExpressCookieConfig;
     getIp?: ExpressGetIp;
-    secret?: string;
+    secret: string;
 };
 
 type ExpressAuthBase<TAccount extends AuthAccount> = Omit<AuthDeps<TAccount>, "db"> & {
+    cache?: SessionCacheConfig;
     cookie?: ExpressCookieConfig;
     db: DbAdapter<TAccount>;
     getIp?: ExpressGetIp;
+    secret: string;
 };
 
 type ExpressSocialOptions<TAccount extends AuthAccount, TData> =
     | {
           db: DbAdapter<TAccount> & SocialDbAdapter<TAccount>;
-          secret: string;
           social: SocialConfig<TData>;
       }
     | {
@@ -64,11 +55,9 @@ export type ExpressAuthConfig<TAccount extends AuthAccount = AuthAccount, TData 
     ExpressAuthBase<TAccount>,
     "db"
 > &
-    ExpressCacheOptions &
     ExpressSocialOptions<TAccount, TData>;
 
-type ExpressAuthOptions<TAccount extends AuthAccount> = Omit<ExpressAuthBase<TAccount>, "db"> &
-    ExpressCacheOptions;
+type ExpressAuthOptions<TAccount extends AuthAccount> = Omit<ExpressAuthBase<TAccount>, "db">;
 
 type DbAccount<TDb> = TDb extends DbAdapter<infer TAccount> ? TAccount : never;
 
@@ -112,17 +101,17 @@ export const createExpressAdapter = <TAccount extends AuthAccount>({
     secret,
 }: ExpressAdapterConfig<TAccount>): ExpressAdapter<TAccount> => {
     const session = createHttpSession<Request, Response, TAccount>({
+        auth,
+        secret,
+        framework: "Express",
         appendSetCookie: ({ response, value }) => {
             response.append("Set-Cookie", value);
         },
-        auth,
+        getHeader: ({ name, request }) => request.get(name),
+        getMethod: (request) => request.method,
         ...(cache === undefined ? {} : { cache }),
         ...(cookie === undefined ? {} : { cookie }),
-        framework: "Express",
-        getHeader: ({ name, request }) => request.get(name),
         ...(getIp === undefined ? {} : { getIp }),
-        getMethod: (request) => request.method,
-        ...(secret === undefined ? {} : { secret }),
     });
 
     const resolveSession = (input: ExpressRequestInput): Promise<ResolvedSession<TAccount>> => {
@@ -185,10 +174,10 @@ const createExpressAuthImpl = <TAccount extends AuthAccount, TData = undefined>(
     });
     const adapter = createExpressAdapter({
         auth,
+        secret,
         ...(cache === undefined ? {} : { cache }),
         ...(cookie === undefined ? {} : { cookie }),
         ...(getIp === undefined ? {} : { getIp }),
-        ...(secret === undefined ? {} : { secret }),
     });
 
     if (social === undefined) {

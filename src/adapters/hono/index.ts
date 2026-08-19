@@ -1,7 +1,7 @@
 import type { Context, Env, MiddlewareHandler } from "hono";
 import { createAuth, type Auth, type AuthDeps } from "../../auth.js";
-import type { SessionCacheConfig } from "../../session/cache.js";
 import type { SessionCookieNames } from "../../session/cookie.js";
+import type { SessionCacheConfig } from "../../session/state.js";
 import type { AuthAccount, DbAdapter, ResolvedSession, Session } from "../../session/types.js";
 import type { SocialConfig, SocialDbAdapter } from "../../social/types.js";
 import { resolveHttpCookie } from "../utils/cookie.js";
@@ -10,7 +10,7 @@ import { createHttpSession } from "../utils/session.js";
 import type { HttpCookieConfig } from "../utils/types.js";
 import { createHonoSocial, type HonoSocial } from "./social.js";
 
-export type { SessionCacheConfig } from "../../session/cache.js";
+export type { SessionCacheConfig } from "../../session/state.js";
 export type { HonoSocial, HonoSocialEnv, HonoSocialVariables } from "./social.js";
 
 export type HonoAuthVariables<TAccount extends AuthAccount = AuthAccount> = {
@@ -29,34 +29,25 @@ export type HonoGetIp = (
     c: Context,
 ) => Promise<string | null | undefined> | string | null | undefined;
 
-type HonoCacheOptions =
-    | {
-          cache: SessionCacheConfig;
-          secret: string;
-      }
-    | {
-          cache?: undefined;
-          secret?: string;
-      };
-
 export type HonoAdapterConfig<TAccount extends AuthAccount = AuthAccount> = {
     auth: Auth<TAccount>;
     cache?: SessionCacheConfig;
     cookie?: HonoCookieConfig;
     getIp?: HonoGetIp;
-    secret?: string;
+    secret: string;
 };
 
 type HonoAuthBase<TAccount extends AuthAccount> = Omit<AuthDeps<TAccount>, "db"> & {
+    cache?: SessionCacheConfig;
     cookie?: HonoCookieConfig;
     db: DbAdapter<TAccount>;
     getIp?: HonoGetIp;
+    secret: string;
 };
 
 type HonoSocialOptions<TAccount extends AuthAccount, TData> =
     | {
           db: DbAdapter<TAccount> & SocialDbAdapter<TAccount>;
-          secret: string;
           social: SocialConfig<TData>;
       }
     | {
@@ -68,11 +59,9 @@ export type HonoAuthConfig<TAccount extends AuthAccount = AuthAccount, TData = u
     HonoAuthBase<TAccount>,
     "db"
 > &
-    HonoCacheOptions &
     HonoSocialOptions<TAccount, TData>;
 
-type HonoAuthOptions<TAccount extends AuthAccount> = Omit<HonoAuthBase<TAccount>, "db"> &
-    HonoCacheOptions;
+type HonoAuthOptions<TAccount extends AuthAccount> = Omit<HonoAuthBase<TAccount>, "db">;
 
 type DbAccount<TDb> = TDb extends DbAdapter<infer TAccount> ? TAccount : never;
 
@@ -116,13 +105,13 @@ export const createHonoAdapter = <TAccount extends AuthAccount>({
             response.header("Set-Cookie", value, { append: true });
         },
         auth,
-        ...(cache === undefined ? {} : { cache }),
-        ...(cookie === undefined ? {} : { cookie }),
+        secret,
         framework: "Hono",
         getHeader: ({ name, request }) => request.req.header(name),
-        ...(getIp === undefined ? {} : { getIp }),
         getMethod: (request) => request.req.method,
-        ...(secret === undefined ? {} : { secret }),
+        ...(cache === undefined ? {} : { cache }),
+        ...(cookie === undefined ? {} : { cookie }),
+        ...(getIp === undefined ? {} : { getIp }),
     });
 
     const clearSession = (c: Context): void => {
@@ -210,10 +199,10 @@ const createHonoAuthImpl = <TAccount extends AuthAccount, TData = undefined>({
     });
     const adapter = createHonoAdapter({
         auth,
+        secret,
         ...(cache === undefined ? {} : { cache }),
         ...(cookie === undefined ? {} : { cookie }),
         ...(getIp === undefined ? {} : { getIp }),
-        ...(secret === undefined ? {} : { secret }),
     });
 
     if (social === undefined) {

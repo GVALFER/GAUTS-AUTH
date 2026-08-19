@@ -76,8 +76,7 @@ const BCRYPT_DEFAULTS = {
 } as const;
 
 export const COOKIE_DEFAULTS = {
-    cacheName: "__cac",
-    renewName: "__ren",
+    contextName: "__ctx",
     sessionName: "__ses",
 } as const;
 

@@ -30,7 +30,7 @@ export type {
     SessionService,
 } from "./session/types.js";
 export type { SessionClient, SessionClientInput } from "./client/index.js";
-export type { SessionCacheConfig } from "./session/cache.js";
+export type { SessionCacheConfig } from "./session/state.js";
 export type {
     CreateSocialRecord,
     SocialAccountRecord,

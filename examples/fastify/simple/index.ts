@@ -10,10 +10,11 @@ type LoginAccount = {
 type SimpleDeps = {
     db: DbAdapter;
     findAccount: (email: string) => Promise<LoginAccount | null>;
+    secret: string;
 };
 
-export const createApp = ({ db, findAccount }: SimpleDeps) => {
-    const auth = createFastifyAuth({ db });
+export const createApp = ({ db, findAccount, secret }: SimpleDeps) => {
+    const auth = createFastifyAuth({ db, secret });
     const app = Fastify();
 
     auth.decorate(app);
