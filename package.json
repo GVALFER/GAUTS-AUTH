@@ -1,6 +1,6 @@
 {
     "name": "@gauts/auth",
-    "version": "0.10.0",
+    "version": "0.10.1",
     "description": "Database-backed password, session, and social authentication for Node.js.",
     "license": "MIT",
     "author": "GVALFER",
@@ -67,6 +67,10 @@
         "./next": {
             "types": "./dist/adapters/next/index.d.ts",
             "import": "./dist/adapters/next/index.js"
+        },
+        "./headers": {
+            "types": "./dist/headers/index.d.ts",
+            "import": "./dist/headers/index.js"
         },
         "./providers": {
             "types": "./dist/providers/index.d.ts",

@@ -1,4 +1,4 @@
-import { buildForwardHeaders } from "@gauts/auth/next";
+import { buildForwardHeaders } from "@gauts/auth/headers";
 import { headers } from "next/headers.js";
 
 const apiUrl = process.env.NEXT_PRIVATE_API_URL;

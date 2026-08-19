@@ -306,6 +306,7 @@ The application owns the redirect URL. When `unauthorizedUrl` is provided, the a
 | `@gauts/auth/express`   | Express cookies, methods, and middleware.                 |
 | `@gauts/auth/fastify`   | Fastify cookies, methods, decorators, and hooks.          |
 | `@gauts/auth/next`      | Next.js renewal scheduling and `Set-Cookie` forwarding.   |
+| `@gauts/auth/headers`   | Browser-safe controlled header forwarding helpers.        |
 | `@gauts/auth/providers` | Google, GitHub, and X OAuth providers.                    |
 
 ## Configuration reference
@@ -1237,10 +1238,10 @@ Result values:
 
 The adapter forwards only the session cookie and controlled client/origin headers required by the private API. `__ctx` is not forwarded because the API renewal endpoint always validates the opaque token through the database and returns a new signed context. Other cookies, authorization headers, and arbitrary headers are not forwarded.
 
-`buildForwardHeaders()` and `FORWARD_HEADERS` are exported from `@gauts/auth/next` for application fetchers that need the same controlled forwarding rules:
+`buildForwardHeaders()` and `FORWARD_HEADERS` are exported from the browser-safe `@gauts/auth/headers` entrypoint for application fetchers that need the same controlled forwarding rules:
 
 ```ts
-import { buildForwardHeaders } from "@gauts/auth/next";
+import { buildForwardHeaders } from "@gauts/auth/headers";
 
 const headers = buildForwardHeaders({
     headers: incoming,
