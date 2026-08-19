@@ -2,7 +2,7 @@
 
 Database-backed password authentication, opaque browser sessions, and optional social authentication for Node.js applications.
 
-`@gauts/auth` provides password hashing, session lifecycle, secure cookies, database validation, optional short caching, Prisma or Drizzle persistence, Hono integration, and Google/GitHub/X OAuth. The application keeps control of credential lookup, business-specific registration data, authorization, responses, and UI.
+`@gauts/auth` provides password hashing, session lifecycle, secure cookies, database validation, optional short caching, Prisma or Drizzle persistence, Hono/Express/Fastify integration, and Google/GitHub/X OAuth. The application keeps control of credential lookup, business-specific registration data, authorization, responses, and UI.
 
 ## Features
 
@@ -19,6 +19,8 @@ Database-backed password authentication, opaque browser sessions, and optional s
 | IP validation                  |   ✅    | Disabled            |
 | Platform validation            |   ✅    | Disabled            |
 | Hono adapter                   |   ✅    | Available           |
+| Express adapter                |   ✅    | Available           |
+| Fastify adapter                |   ✅    | Available           |
 | Prisma adapter                 |   ✅    | Available           |
 | Drizzle MySQL/MariaDB adapter  |   ✅    | Available           |
 | Next.js renewal adapter        |   ✅    | Available           |
@@ -41,10 +43,12 @@ The application defines its credential login, renewal, logout, and protected end
 
 ### 1. Install the package
 
-Run this command inside the Hono API project:
+Install the package and the framework used by the API. Only one framework adapter is required:
 
 ```bash
 npm install @gauts/auth hono
+npm install @gauts/auth express
+npm install @gauts/auth fastify
 ```
 
 When the Next.js frontend is a separate project, run this command inside the frontend project:
@@ -53,16 +57,22 @@ When the Next.js frontend is a separate project, run this command inside the fro
 npm install @gauts/auth next
 ```
 
-`hono` and `next` only need to be installed when the corresponding project does not already provide them.
+Run only the matching API command. `hono`, `express`, `fastify`, and `next` only need to be installed when the corresponding project does not already provide them.
+
+Express TypeScript projects also install its type declarations:
+
+```bash
+npm install --save-dev @types/express
+```
 
 ### 2. Choose the database adapter and schema
 
 One database adapter is required. Prisma and Drizzle are equivalent persistence choices; install and configure only one.
 
-| Adapter | Database support | Setup |
-| ------- | ---------------- | ----- |
-| Prisma | Prisma-supported databases | [Use Prisma](#option-a--prisma) |
-| Drizzle | MySQL and MariaDB | [Use Drizzle](#option-b--drizzle-mysqlmariadb) |
+| Adapter | Database support           | Setup                                          |
+| ------- | -------------------------- | ---------------------------------------------- |
+| Prisma  | Prisma-supported databases | [Use Prisma](#option-a--prisma)                |
+| Drizzle | MySQL and MariaDB          | [Use Drizzle](#option-b--drizzle-mysqlmariadb) |
 
 Both schemas use the same relationship tree:
 
@@ -135,7 +145,7 @@ export const authDb = createDrizzleAdapter({
 
 ### 3. Create the auth instance and routes
 
-This step is identical for Prisma and Drizzle:
+This Hono example is identical for Prisma and Drizzle:
 
 ```ts
 import { createHonoAuth } from "@gauts/auth/hono";
@@ -216,6 +226,16 @@ app.get("/account", auth.requireSession, (c) => {
 });
 ```
 
+The equivalent framework examples are available here:
+
+| Framework | Simple example                                                  | Advanced example                                                    |
+| --------- | --------------------------------------------------------------- | ------------------------------------------------------------------- |
+| Hono      | [`examples/hono/simple`](./examples/hono/simple/index.ts)       | [`examples/hono/advanced`](./examples/hono/advanced/index.ts)       |
+| Express   | [`examples/express/simple`](./examples/express/simple/index.ts) | [`examples/express/advanced`](./examples/express/advanced/index.ts) |
+| Fastify   | [`examples/fastify/simple`](./examples/fastify/simple/index.ts) | [`examples/fastify/advanced`](./examples/fastify/advanced/index.ts) |
+
+Express exposes authenticated values through `response.locals`. Fastify exposes them through request decorators and requires one `auth.decorate(app)` call before routes are registered. All routes remain application-owned.
+
 When `storedHash` is missing, the package performs password work with the configured algorithm and always returns `false`. Applications do not need a dummy hash. Keep the response identical for unknown accounts and incorrect passwords.
 
 ### 4. Connect the Next.js frontend
@@ -262,9 +282,11 @@ The application owns the redirect URL. When `unauthorizedUrl` is provided, the a
 - A database adapter.
 - Drizzle ORM 0.45.2 or newer when using the Drizzle adapter.
 - Hono 4 when using the Hono adapter.
+- Express 5 when using the Express adapter.
+- Fastify 5 when using the Fastify adapter.
 - Next.js 15 or newer when using the Next.js adapter.
 
-`drizzle-orm`, `hono`, and `next` are optional peer dependencies. The Prisma adapter receives the application's generated Prisma client and does not import Prisma at runtime. The Drizzle adapter imports `drizzle-orm`, while the application owns the MySQL/MariaDB driver.
+`drizzle-orm`, `hono`, `express`, `fastify`, and `next` are optional peer dependencies. Installing or importing one adapter does not load the others. The Prisma adapter receives the application's generated Prisma client and does not import Prisma at runtime. The Drizzle adapter imports `drizzle-orm`, while the application owns the MySQL/MariaDB driver.
 
 | Import                  | Purpose                                                   |
 | ----------------------- | --------------------------------------------------------- |
@@ -272,6 +294,8 @@ The application owns the redirect URL. When `unauthorizedUrl` is provided, the a
 | `@gauts/auth/drizzle`   | Drizzle database adapter for MySQL and MariaDB.           |
 | `@gauts/auth/prisma`    | Prisma database adapter.                                  |
 | `@gauts/auth/hono`      | Hono cookies, methods, and middleware.                    |
+| `@gauts/auth/express`   | Express cookies, methods, and middleware.                 |
+| `@gauts/auth/fastify`   | Fastify cookies, methods, decorators, and hooks.          |
 | `@gauts/auth/next`      | Next.js renewal scheduling and `Set-Cookie` forwarding.   |
 | `@gauts/auth/providers` | Google, GitHub, and X OAuth providers.                    |
 
@@ -295,6 +319,8 @@ type HonoGetIp = (c: Context) => Promise<string | null | undefined> | string | n
 ```
 
 When `getIp` is omitted, the adapter stores `ip: null` and does not read IP headers automatically. Configuring `session.validation` with `"ip"` requires `getIp` and fails during initialization when it is missing.
+
+`createExpressAuth()` and `createFastifyAuth()` accept the same configuration. Their `getIp` callback receives the native Express or Fastify request instead of a Hono context.
 
 ### Password
 
@@ -776,6 +802,62 @@ await auth.createSession({
 
 `requireSession` authenticates only. Application-specific route permissions remain the application's responsibility.
 
+## Express adapter
+
+```ts
+import { createExpressAuth, type ExpressAuthLocals } from "@gauts/auth/express";
+
+const auth = createExpressAuth({ db });
+
+app.get("/account", auth.requireSession, (_request, response) => {
+    const { account, session, user } = response.locals as ExpressAuthLocals;
+    response.json({ account, session, user });
+});
+```
+
+| Method                                                            | Purpose                                              |
+| ----------------------------------------------------------------- | ---------------------------------------------------- |
+| `auth.createSession({ account_id, request, response, country? })` | Creates the DB session and writes cookies.           |
+| `auth.resolveSession({ request, response })`                      | Resolves the selected account and session.           |
+| `auth.renewSession({ request, response })`                        | Renews when due and writes authoritative cookies.    |
+| `auth.revokeSession({ request, response })`                       | Revokes the current session and clears cookies.      |
+| `auth.clearSession(response)`                                     | Clears cookies without revoking the DB session.      |
+| `auth.getToken(request)`                                          | Reads and validates the opaque session token.        |
+| `auth.requireSession`                                             | Express middleware that populates `response.locals`. |
+
+Express 5 forwards rejected async middleware promises to the application's error handler. The adapter does not install routes or an error handler.
+
+## Fastify adapter
+
+Register the request decorators once before declaring routes:
+
+```ts
+import { createFastifyAuth } from "@gauts/auth/fastify";
+
+const auth = createFastifyAuth({ db });
+
+auth.decorate(app);
+
+app.get("/account", { preHandler: auth.requireSession }, (request) => ({
+    account: request.getDecorator("account"),
+    session: request.getDecorator("session"),
+    user: request.getDecorator("user"),
+}));
+```
+
+| Method                                                         | Purpose                                                        |
+| -------------------------------------------------------------- | -------------------------------------------------------------- |
+| `auth.decorate(app)`                                           | Declares the native request decorators once at startup.        |
+| `auth.createSession({ account_id, request, reply, country? })` | Creates the DB session and writes cookies.                     |
+| `auth.resolveSession({ request, reply })`                      | Resolves the selected account and session.                     |
+| `auth.renewSession({ request, reply })`                        | Renews when due and writes authoritative cookies.              |
+| `auth.revokeSession({ request, reply })`                       | Revokes the current session and clears cookies.                |
+| `auth.clearSession(reply)`                                     | Clears cookies without revoking the DB session.                |
+| `auth.getToken(request)`                                       | Reads and validates the opaque session token.                  |
+| `auth.requireSession`                                          | Fastify `preHandler` that populates native request decorators. |
+
+When social authentication is enabled, `auth.decorate(app)` also declares `social`. The adapter does not register a Fastify plugin or create routes.
+
 ## Social authentication
 
 Social authentication is an optional addon and remains disabled unless `social` is configured. Complete these steps only in applications that need Google, GitHub, or X authentication.
@@ -915,7 +997,7 @@ Register every `callbackUrl` shown above in the corresponding provider dashboard
 
 ### 3. Add the API route and frontend start
 
-Declare one dynamic API route covering every configured provider. `social.handle` is Hono middleware: it completes `start` and expected error responses itself, then calls the application handler only after a successful callback.
+Declare one dynamic API route covering every configured provider. `social.handle` completes `start` and expected error responses itself, then continues to the application handler only after a successful callback.
 
 ```ts
 app.get("/auth/social/:provider/:action", auth.social.handle, async (c) => {
@@ -958,6 +1040,18 @@ social.identity;
 social.registered;
 social.returnTo;
 ```
+
+The native equivalents are:
+
+```ts
+// Express
+const social = (response.locals as ExpressSocialLocals).social;
+
+// Fastify
+const social = request.getDecorator<SocialAuthenticated>("social");
+```
+
+See the advanced framework examples for complete social routes and custom registration.
 
 The package does not create the application route, session, notifications, logs, or final success response. Those remain explicit in the route handler.
 
@@ -1084,7 +1178,7 @@ app.post("/auth/register/social", async (c) => {
 
 ### Core and adapter composition
 
-`createHonoAuth()` is the normal entry point. Use separate composition only when the same core instance is required outside Hono:
+Use the entry point matching the application framework: `createHonoAuth()`, `createExpressAuth()`, or `createFastifyAuth()`. Use separate composition only when the same core instance is required outside the framework adapter:
 
 ```ts
 import { createAuth } from "@gauts/auth";

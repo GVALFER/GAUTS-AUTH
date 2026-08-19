@@ -89,10 +89,7 @@ describe("signed session cache", () => {
             },
         });
         assert.deepEqual(cache.resolve({ client, token, value: cached.value }), resolved);
-        assert.equal(
-            cache.resolve({ client, token: "b".repeat(43), value: cached.value }),
-            null,
-        );
+        assert.equal(cache.resolve({ client, token: "b".repeat(43), value: cached.value }), null);
     });
 
     it("rejects expired, altered, and mismatched cache values", () => {

@@ -260,7 +260,10 @@ describe("Drizzle MySQL database adapter", () => {
             session.token_hash,
             null,
         ]);
-        assert.equal((await db.find({ account_id: account.id, session_id: session.id }))?.id, session.id);
+        assert.equal(
+            (await db.find({ account_id: account.id, session_id: session.id }))?.id,
+            session.id,
+        );
 
         harness.respond([
             session.account_id,
@@ -284,7 +287,9 @@ describe("Drizzle MySQL database adapter", () => {
         await db.revoke({ revoked_at: now, session_ids: [session.id] });
 
         assert.equal(harness.calls.filter((call) => call.method === "execute").length, 3);
-        assert.ok(harness.calls.some((call) => call.sql.startsWith("insert into `account_sessions`")));
+        assert.ok(
+            harness.calls.some((call) => call.sql.startsWith("insert into `account_sessions`")),
+        );
         assert.ok(harness.calls.some((call) => call.sql.startsWith("update `account_sessions`")));
     });
 

@@ -1,11 +1,4 @@
-import {
-    index,
-    mysqlTable,
-    text,
-    timestamp,
-    uniqueIndex,
-    varchar,
-} from "drizzle-orm/mysql-core";
+import { index, mysqlTable, text, timestamp, uniqueIndex, varchar } from "drizzle-orm/mysql-core";
 
 export const users = mysqlTable("users", {
     id: varchar("id", { length: 255 }).primaryKey(),
@@ -83,9 +76,6 @@ export const socialAccounts = mysqlTable(
             table.provider,
             table.provider_id,
         ),
-        uniqueIndex("social_accounts_account_id_provider_key").on(
-            table.account_id,
-            table.provider,
-        ),
+        uniqueIndex("social_accounts_account_id_provider_key").on(table.account_id, table.provider),
     ],
 );

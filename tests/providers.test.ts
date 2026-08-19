@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-
 import { github } from "../src/providers/github.js";
 import { google } from "../src/providers/google.js";
 import { x } from "../src/providers/x.js";
@@ -222,8 +221,7 @@ describe("social providers", () => {
                             codeVerifier: "verifier-value",
                         }),
                 }),
-            (error: unknown) =>
-                isAuthError(error) && error.code === "SOCIAL_PROVIDER_ERROR",
+            (error: unknown) => isAuthError(error) && error.code === "SOCIAL_PROVIDER_ERROR",
         );
 
         await assert.rejects(

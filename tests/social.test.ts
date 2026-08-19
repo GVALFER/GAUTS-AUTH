@@ -1,8 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-
 import { Hono } from "hono";
-
 import { createHonoAuth } from "../src/adapters/hono/index.js";
 import { isAuthError } from "../src/errors.js";
 import { resolveSocialNavigation } from "../src/social/navigation.js";
@@ -28,11 +26,13 @@ import type {
 } from "../src/session/types.js";
 
 const secret = "s".repeat(32);
+
 const navigation = {
     errorTo: "/auth/login",
     registerTo: null,
     returnTo: "/dashboard",
 };
+
 const identity: SocialIdentity = {
     avatarUrl: "https://images.example/avatar.png",
     email: "new@example.com",
@@ -313,8 +313,7 @@ describe("social navigation", () => {
                         registerTo: undefined,
                         returnTo,
                     }),
-                (error: unknown) =>
-                    isAuthError(error) && error.code === "SOCIAL_STATE_INVALID",
+                (error: unknown) => isAuthError(error) && error.code === "SOCIAL_STATE_INVALID",
             );
         }
     });
@@ -341,8 +340,7 @@ describe("social service", () => {
 
             await assert.rejects(
                 () => service.find(verified),
-                (error: unknown) =>
-                    isAuthError(error) && error.code === "SOCIAL_EMAIL_MISMATCH",
+                (error: unknown) => isAuthError(error) && error.code === "SOCIAL_EMAIL_MISMATCH",
             );
             assert.equal(harness.links.length, 1);
         }
@@ -432,8 +430,7 @@ describe("social service", () => {
 
         await assert.rejects(
             () => service.register({ data: undefined, identity }),
-            (error: unknown) =>
-                isAuthError(error) && error.code === "SOCIAL_EMAIL_MISMATCH",
+            (error: unknown) => isAuthError(error) && error.code === "SOCIAL_EMAIL_MISMATCH",
         );
         assert.equal(harness.links.length, 0);
     });
@@ -444,8 +441,7 @@ describe("social service", () => {
 
         await assert.rejects(
             () => service.register({ data: undefined, identity }),
-            (error: unknown) =>
-                isAuthError(error) && error.code === "SOCIAL_ACCOUNT_NOT_FOUND",
+            (error: unknown) => isAuthError(error) && error.code === "SOCIAL_ACCOUNT_NOT_FOUND",
         );
     });
 });

@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-
 import { createHonoAuth } from "../src/adapters/hono/index.js";
 import { createAuth } from "../src/auth.js";
 import { resolveSessionConfig } from "../src/config.js";

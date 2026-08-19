@@ -1,15 +1,10 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-
 import { resolveSessionConfig, type SessionValidation } from "../src/config.js";
 import { isAuthError } from "../src/errors.js";
 import { createSessionService } from "../src/session/service.js";
 import { hashToken, tokenPattern } from "../src/session/token.js";
-import type {
-    CreateSessionRecord,
-    DbAdapter,
-    SessionRecord,
-} from "../src/session/types.js";
+import type { CreateSessionRecord, DbAdapter, SessionRecord } from "../src/session/types.js";
 
 const client = {
     agent: "Complete  User Agent",
@@ -100,10 +95,7 @@ const createDb = () => {
     };
 };
 
-const createHarness = ({
-    maxLifetime = 1_800,
-    validation = ["agent"],
-}: HarnessConfig = {}) => {
+const createHarness = ({ maxLifetime = 1_800, validation = ["agent"] }: HarnessConfig = {}) => {
     let current = new Date("2026-08-15T12:00:00.000Z");
     const db = createDb();
     const session = createSessionService({
@@ -146,14 +138,8 @@ describe("session service", () => {
         assert.equal(row?.ip, "2001:db8::1");
         assert.equal(row?.agent, client.agent);
         assert.equal(row?.country, "PT");
-        assert.equal(
-            created.session.renew_at.toISOString(),
-            "2026-08-15T12:01:00.000Z",
-        );
-        assert.equal(
-            created.session.expires_at.toISOString(),
-            "2026-08-15T12:05:00.000Z",
-        );
+        assert.equal(created.session.renew_at.toISOString(), "2026-08-15T12:01:00.000Z");
+        assert.equal(created.session.expires_at.toISOString(), "2026-08-15T12:05:00.000Z");
     });
 
     it("resolves from the database without renewing", async () => {
@@ -170,10 +156,7 @@ describe("session service", () => {
         });
 
         assert.equal(resolved?.session.id, created.session.id);
-        assert.equal(
-            resolved?.session.expires_at.getTime(),
-            created.session.expires_at.getTime(),
-        );
+        assert.equal(resolved?.session.expires_at.getTime(), created.session.expires_at.getTime());
         assert.equal(resolved?.account, account);
         assert.equal(harness.db.calls.findToken, 2);
         assert.equal(harness.db.calls.updateExpiry, 0);
@@ -202,14 +185,8 @@ describe("session service", () => {
         assert.equal(renewed?.renewed, true);
         assert.equal(renewed?.account, account);
         assert.equal(harness.db.calls.updateExpiry, 1);
-        assert.equal(
-            renewed?.session.expires_at.toISOString(),
-            "2026-08-15T12:06:01.000Z",
-        );
-        assert.equal(
-            renewed?.session.renew_at.toISOString(),
-            "2026-08-15T12:02:01.000Z",
-        );
+        assert.equal(renewed?.session.expires_at.toISOString(), "2026-08-15T12:06:01.000Z");
+        assert.equal(renewed?.session.renew_at.toISOString(), "2026-08-15T12:02:01.000Z");
         assert.ok(
             await harness.session.resolve({
                 client,
@@ -246,10 +223,7 @@ describe("session service", () => {
         assert.equal(second?.session.renew_at.toISOString(), "2026-08-15T12:03:01.000Z");
 
         harness.advance(239);
-        assert.equal(
-            await harness.session.resolve({ client, token: created.token }),
-            null,
-        );
+        assert.equal(await harness.session.resolve({ client, token: created.token }), null);
     });
 
     it("rejects inactive sessions", async () => {
@@ -260,14 +234,8 @@ describe("session service", () => {
         });
 
         harness.advance(301);
-        assert.equal(
-            await harness.session.resolve({ client, token: created.token }),
-            null,
-        );
-        assert.equal(
-            await harness.session.renew({ client, token: created.token }),
-            null,
-        );
+        assert.equal(await harness.session.resolve({ client, token: created.token }), null);
+        assert.equal(await harness.session.renew({ client, token: created.token }), null);
     });
 
     it("revokes a session when a configured client field changes", async () => {
@@ -285,10 +253,7 @@ describe("session service", () => {
             (error) => isAuthError(error) && error.code === "SESSION_CLIENT_MISMATCH",
         );
         assert.ok(harness.db.rows.get(created.session.id)?.revoked_at);
-        assert.equal(
-            await harness.session.resolve({ client, token: created.token }),
-            null,
-        );
+        assert.equal(await harness.session.resolve({ client, token: created.token }), null);
     });
 
     it("rejects creation when a configured client field is missing", async () => {
@@ -344,19 +309,14 @@ describe("session service", () => {
             }),
             [first.session.id],
         );
-        assert.deepEqual(await harness.session.revokeAccount("account-1"), [
-            second.session.id,
-        ]);
+        assert.deepEqual(await harness.session.revokeAccount("account-1"), [second.session.id]);
         assert.equal((await harness.session.list("account-1")).length, 0);
     });
 
     it("does not query the database for malformed tokens", async () => {
         const harness = createHarness();
 
-        assert.equal(
-            await harness.session.resolve({ client, token: "invalid" }),
-            null,
-        );
+        assert.equal(await harness.session.resolve({ client, token: "invalid" }), null);
         assert.equal(harness.db.calls.findToken, 0);
     });
 
@@ -369,10 +329,7 @@ describe("session service", () => {
 
         harness.db.setAllowed(false);
 
-        assert.equal(
-            await harness.session.resolve({ client, token: created.token }),
-            null,
-        );
+        assert.equal(await harness.session.resolve({ client, token: created.token }), null);
         assert.ok(harness.db.rows.get(created.session.id)?.revoked_at);
     });
 

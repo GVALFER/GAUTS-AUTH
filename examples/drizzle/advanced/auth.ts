@@ -2,7 +2,6 @@ import { createDrizzleAdapter } from "@gauts/auth/drizzle";
 import { createHonoAuth } from "@gauts/auth/hono";
 import { google } from "@gauts/auth/providers";
 import type { MySql2Database } from "drizzle-orm/mysql2";
-
 import { accountSessions, socialAccounts, userAccounts, users } from "./schema.js";
 
 type Schema = {

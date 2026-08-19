@@ -1,5 +1,4 @@
 import { NextResponse, type NextRequest } from "next/server.js";
-
 import { auth } from "./auth.js";
 
 export const proxy = async (request: NextRequest) => {

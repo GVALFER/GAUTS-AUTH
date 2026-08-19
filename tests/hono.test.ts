@@ -1,12 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-
 import { Hono } from "hono";
-
-import {
-    createHonoAdapter,
-    type HonoAuthEnv,
-} from "../src/adapters/hono/index.js";
+import { createHonoAdapter, type HonoAuthEnv } from "../src/adapters/hono/index.js";
 import type { Auth } from "../src/auth.js";
 import { createError, isAuthError } from "../src/errors.js";
 import type { RenewedSession, ResolvedSession, Session } from "../src/session/types.js";
@@ -14,6 +9,7 @@ import type { RenewedSession, ResolvedSession, Session } from "../src/session/ty
 const token = "a".repeat(43);
 const secret = "s".repeat(32);
 const testNow = Date.now();
+
 const account = {
     email: "owner@example.com",
     id: "account-1",
@@ -28,6 +24,7 @@ const account = {
         status: "ACTIVE",
     },
 } as const;
+
 const session: Session = {
     account_id: account.id,
     client: {
@@ -40,6 +37,7 @@ const session: Session = {
     id: "session-1",
     renew_at: new Date(testNow + 24 * 60 * 60 * 1000),
 };
+
 const resolved: ResolvedSession<typeof account> = { account, session };
 const renewAt = Math.floor(session.renew_at.getTime() / 1000).toString();
 
@@ -116,13 +114,7 @@ const withoutIpValidation = (auth: Auth<typeof account>): Auth<typeof account> =
     },
 });
 
-const createApp = ({
-    auth,
-    cache = false,
-}: {
-    auth: Auth<typeof account>;
-    cache?: boolean;
-}) => {
+const createApp = ({ auth, cache = false }: { auth: Auth<typeof account>; cache?: boolean }) => {
     const adapter = createHonoAdapter({
         auth,
         cookie: {
@@ -143,10 +135,7 @@ const createApp = ({
 
     app.onError((error, c) => {
         if (isAuthError(error)) {
-            return c.json(
-                { code: error.code },
-                error.code === "SESSION_INVALID" ? 401 : 403,
-            );
+            return c.json({ code: error.code }, error.code === "SESSION_INVALID" ? 401 : 403);
         }
 
         return c.json({ code: "INTERNAL" }, 500);
@@ -381,17 +370,17 @@ describe("Hono adapter", () => {
         assert.equal(response.status, 204);
         assert.equal(renewCalls, 1);
         assert.equal(getCookiePair(response, "session"), `session=${token}`);
-        assert.equal(
-            getCookiePair(response, "session-renew"),
-            `session-renew=${renewAt}`,
-        );
+        assert.equal(getCookiePair(response, "session-renew"), `session-renew=${renewAt}`);
         assert.match(getCookiePair(response, "session-cache") ?? "", /^session-cache=.+/);
 
         const cookies = getSetCookies(response);
         const sessionCookie = cookies.find((cookie) => cookie.startsWith("session="));
         const renewCookie = cookies.find((cookie) => cookie.startsWith("session-renew="));
 
-        assert.match(sessionCookie ?? "", new RegExp(`Expires=${session.expires_at.toUTCString()}`));
+        assert.match(
+            sessionCookie ?? "",
+            new RegExp(`Expires=${session.expires_at.toUTCString()}`),
+        );
         assert.match(renewCookie ?? "", new RegExp(`Expires=${session.expires_at.toUTCString()}`));
 
         for (const cookie of cookies) {
@@ -480,10 +469,7 @@ describe("Hono adapter", () => {
 
         assert.deepEqual(await setResponse.json(), { account_id: account.id });
         assert.equal(getCookiePair(setResponse, "session"), `session=${token}`);
-        assert.equal(
-            getCookiePair(setResponse, "session-renew"),
-            `session-renew=${renewAt}`,
-        );
+        assert.equal(getCookiePair(setResponse, "session-renew"), `session-renew=${renewAt}`);
         assert.match(getCookiePair(setResponse, "session-cache") ?? "", /^session-cache=.+/);
         assert.deepEqual(await revokeResponse.json(), { revoked: [session.id] });
         assert.match(getCookiePair(revokeResponse, "session") ?? "", /^session=$/);

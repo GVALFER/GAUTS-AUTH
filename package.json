@@ -17,6 +17,8 @@
         "argon2",
         "bcrypt",
         "drizzle",
+        "express",
+        "fastify",
         "hono",
         "mariadb",
         "mysql",
@@ -50,6 +52,14 @@
             "types": "./dist/adapters/drizzle/index.d.ts",
             "import": "./dist/adapters/drizzle/index.js"
         },
+        "./express": {
+            "types": "./dist/adapters/express/index.d.ts",
+            "import": "./dist/adapters/express/index.js"
+        },
+        "./fastify": {
+            "types": "./dist/adapters/fastify/index.d.ts",
+            "import": "./dist/adapters/fastify/index.js"
+        },
         "./hono": {
             "types": "./dist/adapters/hono/index.d.ts",
             "import": "./dist/adapters/hono/index.js"
@@ -67,7 +77,7 @@
         "clean": "node --eval \"import { rmSync } from 'node:fs'; rmSync('dist', { force: true, recursive: true })\"",
         "build": "npm run clean && tsc -p tsconfig.build.json",
         "typecheck": "tsc --noEmit",
-        "typecheck:examples": "npm run build && tsc -p examples/drizzle/tsconfig.json && tsc -p examples/hono/tsconfig.json && tsc -p examples/next/tsconfig.json",
+        "typecheck:examples": "npm run build && tsc -p examples/drizzle/tsconfig.json && tsc -p examples/express/tsconfig.json && tsc -p examples/fastify/tsconfig.json && tsc -p examples/hono/tsconfig.json && tsc -p examples/next/tsconfig.json",
         "lint": "eslint src tests examples",
         "test": "node --import tsx --test tests/**/*.test.ts",
         "check": "npm run build && npm run lint && npm run typecheck && npm test",
@@ -78,15 +88,24 @@
     },
     "dependencies": {
         "argon2": "^0.45.1",
-        "bcryptjs": "^3.0.2"
+        "bcryptjs": "^3.0.2",
+        "cookie": "^2.0.1"
     },
     "peerDependencies": {
         "drizzle-orm": "^0.45.2",
+        "express": "^5.0.0",
+        "fastify": "^5.0.0",
         "hono": "^4.13.0",
         "next": ">=15.0.0"
     },
     "peerDependenciesMeta": {
         "drizzle-orm": {
+            "optional": true
+        },
+        "express": {
+            "optional": true
+        },
+        "fastify": {
             "optional": true
         },
         "hono": {
@@ -98,9 +117,12 @@
     },
     "devDependencies": {
         "@eslint/js": "^9.39.5",
+        "@types/express": "^5.0.6",
         "@types/node": "^24.10.0",
         "drizzle-orm": "^0.45.2",
         "eslint": "^9.39.5",
+        "express": "^5.2.1",
+        "fastify": "^5.12.1",
         "globals": "^16.5.0",
         "hono": "^4.13.0",
         "mysql2": "^3.23.3",

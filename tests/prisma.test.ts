@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-
 import {
     createPrismaAdapter,
     type PrismaAccountModel,
@@ -221,9 +220,7 @@ const assertTypes = () => {
         }),
         session: { validation: [] },
     });
-    type InlineAccount = NonNullable<
-        Awaited<ReturnType<typeof inline.session.resolve>>
-    >["account"];
+    type InlineAccount = NonNullable<Awaited<ReturnType<typeof inline.session.resolve>>>["account"];
     const inlineAccount = null as unknown as InlineAccount;
     const inlineRole: "ADMIN" | "OWNER" = inlineAccount.role;
     const inlineUserRole: "ADMIN" | "USER" = inlineAccount.user.role;
@@ -233,9 +230,7 @@ const assertTypes = () => {
 
     const defaults = createPrismaAdapter({ client });
     void defaults;
-    type DefaultAccount = NonNullable<
-        Awaited<ReturnType<typeof defaults.findToken>>
-    >["account"];
+    type DefaultAccount = NonNullable<Awaited<ReturnType<typeof defaults.findToken>>>["account"];
     const defaultAccount = null as unknown as DefaultAccount;
     const defaultEmail: string = defaultAccount.email;
     const defaultName: string = defaultAccount.user.name;
