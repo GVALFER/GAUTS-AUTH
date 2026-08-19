@@ -153,10 +153,7 @@ export const createDrizzleAdapter: CreateDrizzleAdapter = <
                     user: userSelect,
                 })
                 .from(models.sessions)
-                .innerJoin(
-                    models.accounts.table,
-                    eq(sessionColumns.account_id, accountColumns.id),
-                )
+                .innerJoin(models.accounts.table, eq(sessionColumns.account_id, accountColumns.id))
                 .innerJoin(models.users.table, eq(accountColumns.user_id, userColumns.id))
                 .where(eq(sessionColumns.token_hash, token_hash))
                 .limit(1);
@@ -178,10 +175,7 @@ export const createDrizzleAdapter: CreateDrizzleAdapter = <
                     updated_at: revoked_at,
                 })
                 .where(
-                    and(
-                        inArray(sessionColumns.id, session_ids),
-                        isNull(sessionColumns.revoked_at),
-                    ),
+                    and(inArray(sessionColumns.id, session_ids), isNull(sessionColumns.revoked_at)),
                 );
         },
 
