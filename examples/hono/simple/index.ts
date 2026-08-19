@@ -1,25 +1,19 @@
-import { Hono } from "hono";
 import { isAuthError, type DbAdapter } from "@gauts/auth";
 import { createHonoAuth, type HonoAuthEnv } from "@gauts/auth/hono";
+import { Hono } from "hono";
 
 type LoginAccount = {
     id: string;
     passwordHash: string;
 };
 
-type ExampleDeps = {
+type SimpleDeps = {
     db: DbAdapter;
     findAccount: (email: string) => Promise<LoginAccount | null>;
-    secret: string;
 };
 
-export const createApp = ({ db, findAccount, secret }: ExampleDeps) => {
-    const auth = createHonoAuth({
-        cache: { ttl: 60 },
-        db,
-        secret,
-    });
-
+export const createApp = ({ db, findAccount }: SimpleDeps) => {
+    const auth = createHonoAuth({ db });
     const app = new Hono<HonoAuthEnv>();
 
     app.onError((error, c) => {
@@ -28,7 +22,6 @@ export const createApp = ({ db, findAccount, secret }: ExampleDeps) => {
         }
 
         const status = error.code === "DB_UNAVAILABLE" ? 503 : 401;
-
         return c.json({ error: error.message }, status);
     });
 
@@ -39,7 +32,6 @@ export const createApp = ({ db, findAccount, secret }: ExampleDeps) => {
         }>();
 
         const account = await findAccount(body.email);
-
         const passwordValid = await auth.password.verify({
             password: body.password,
             storedHash: account?.passwordHash,

@@ -58,7 +58,7 @@
         "clean": "node --eval \"import { rmSync } from 'node:fs'; rmSync('dist', { force: true, recursive: true })\"",
         "build": "npm run clean && tsc -p tsconfig.build.json",
         "typecheck": "tsc --noEmit",
-        "typecheck:example": "npm run build && tsc -p examples/hono/tsconfig.json",
+        "typecheck:examples": "npm run build && tsc -p examples/hono/tsconfig.json && tsc -p examples/next/tsconfig.json",
         "lint": "eslint src tests examples",
         "test": "node --import tsx --test tests/**/*.test.ts",
         "check": "npm run build && npm run lint && npm run typecheck && npm test",
