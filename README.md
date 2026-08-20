@@ -253,6 +253,7 @@ When `storedHash` is missing, the package performs password work with the config
 ### 4. Connect the Next.js frontend (Optional)
 
 This step is optional and only needed if you want to renew the session in SSR.
+
 Create the renewal adapter with the API's private URL:
 
 ```ts
