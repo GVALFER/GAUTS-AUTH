@@ -1,5 +1,7 @@
 # `@gauts/auth`
 
+[![Bundle Size](https://img.shields.io/bundlephobia/minzip/%40gauts%2Fauth)](https://bundlephobia.com/package/@gauts/auth)
+
 Database-backed password authentication, opaque browser sessions, and optional social authentication for Node.js applications.
 
 `@gauts/auth` provides password hashing, session lifecycle, secure cookies, database validation, optional short caching, Prisma or Drizzle persistence, Hono/Express/Fastify integration, and Google/GitHub/X OAuth. The application keeps control of credential lookup, business-specific registration data, authorization, responses, and UI.
