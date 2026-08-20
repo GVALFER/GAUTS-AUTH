@@ -4,8 +4,8 @@
 [![npm downloads](https://img.shields.io/npm/dm/@gauts/auth?logo=npm)](https://www.npmjs.com/package/@gauts/auth)
 [![Node.js](https://img.shields.io/node/v/@gauts/auth?logo=node.js)](https://nodejs.org)
 [![License](https://img.shields.io/npm/l/@gauts/auth)](https://github.com/GVALFER/GAUTS-AUTH/blob/main/LICENSE)
-[![Minified Size](https://img.shields.io/bundlephobia/min/@gauts/auth)](https://bundlephobia.com/package/@gauts/auth)
-[![Minified and Gzipped Size](https://img.shields.io/bundlephobia/minzip/@gauts/auth)](https://bundlephobia.com/package/@gauts/auth)
+[![Minified Size](https://img.shields.io/badge/minified-34.3_kB-blue)](https://bundlephobia.com/package/@gauts/auth)
+[![Minified and Gzipped Size](https://img.shields.io/badge/minified_%2B_gzip-14.4_kB-blue)](https://bundlephobia.com/package/@gauts/auth)
 
 Secure authentication for Node.js applications, with password login, persistent sessions, social providers, and adapters for popular frameworks and databases.
 
