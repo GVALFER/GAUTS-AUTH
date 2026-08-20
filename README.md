@@ -250,8 +250,9 @@ Express exposes authenticated values through `response.locals`. Fastify exposes 
 
 When `storedHash` is missing, the package performs password work with the configured algorithm and always returns `false`. Applications do not need a dummy hash. Keep the response identical for unknown accounts and incorrect passwords.
 
-### 4. Connect the Next.js frontend
+### 4. Connect the Next.js frontend (Optional)
 
+This step is optional and only needed if you want to renew the session in SSR.
 Create the renewal adapter with the API's private URL:
 
 ```ts
@@ -316,16 +317,16 @@ The application owns the redirect URL. When `unauthorizedUrl` is provided, the a
 
 ### `createHonoAuth()`
 
-| Property   | Type / allowed values |         Required         | Default           | Description                                                                                         |
-| ---------- | --------------------- | :----------------------: | ----------------- | --------------------------------------------------------------------------------------------------- |
-| `db`       | `DbAdapter`           |            ✅            | —                 | Authoritative session persistence and account loading.                                              |
-| `getIp`    | `HonoGetIp`           | Only with IP validation  | Omitted           | Returns the client IP from a source trusted by the application. May be synchronous or asynchronous. |
-| `password` | `PasswordConfig`      |            ❌            | Argon2id defaults | Password hashing and verification configuration.                                                    |
-| `session`  | `SessionConfig`       |            ❌            | Session defaults  | Expiry, renewal, and client validation configuration.                                               |
-| `cookie`   | `HonoCookieConfig`    |            ❌            | Cookie defaults   | Names, domain, path, SameSite, and Secure settings.                                                 |
-| `cache`    | `{ ttl: number }`     |            ❌            | Disabled          | Enables the short signed browser cache.                                                             |
-| `secret`   | `string`              |            ✅            | —                 | HMAC secret for signed session context and optional social data. Minimum 32 UTF-8 bytes.             |
-| `social`   | `SocialConfig`        |            ❌            | Disabled          | Enables configured social providers, redirects, and optional registration.                          |
+| Property   | Type / allowed values |        Required         | Default           | Description                                                                                         |
+| ---------- | --------------------- | :---------------------: | ----------------- | --------------------------------------------------------------------------------------------------- |
+| `db`       | `DbAdapter`           |           ✅            | —                 | Authoritative session persistence and account loading.                                              |
+| `getIp`    | `HonoGetIp`           | Only with IP validation | Omitted           | Returns the client IP from a source trusted by the application. May be synchronous or asynchronous. |
+| `password` | `PasswordConfig`      |           ❌            | Argon2id defaults | Password hashing and verification configuration.                                                    |
+| `session`  | `SessionConfig`       |           ❌            | Session defaults  | Expiry, renewal, and client validation configuration.                                               |
+| `cookie`   | `HonoCookieConfig`    |           ❌            | Cookie defaults   | Names, domain, path, SameSite, and Secure settings.                                                 |
+| `cache`    | `{ ttl: number }`     |           ❌            | Disabled          | Enables the short signed browser cache.                                                             |
+| `secret`   | `string`              |           ✅            | —                 | HMAC secret for signed session context and optional social data. Minimum 32 UTF-8 bytes.            |
+| `social`   | `SocialConfig`        |           ❌            | Disabled          | Enables configured social providers, redirects, and optional registration.                          |
 
 ```ts
 type HonoGetIp = (c: Context) => Promise<string | null | undefined> | string | null | undefined;
@@ -417,14 +418,14 @@ renew_at     = min((updated_at ?? created_at) + renewInterval, maxExpiresAt)
 
 ### Cookies
 
-| Property      | Type / allowed values         | Default           | Description                                                                                   |
-| ------------- | ----------------------------- | ----------------- | --------------------------------------------------------------------------------------------- |
-| `sessionName` | Valid cookie name             | `"__ses"`         | Contains the opaque token. This is the only authenticating cookie.                            |
+| Property      | Type / allowed values         | Default           | Description                                                                                    |
+| ------------- | ----------------------------- | ----------------- | ---------------------------------------------------------------------------------------------- |
+| `sessionName` | Valid cookie name             | `"__ses"`         | Contains the opaque token. This is the only authenticating cookie.                             |
 | `contextName` | Valid cookie name             | `"__ctx"`         | Contains signed renewal scheduling and the optional short cache. It never authenticates alone. |
-| `domain`      | `string`                      | Browser host only | Optional cookie domain.                                                                       |
-| `path`        | String beginning with `/`     | `"/"`             | Cookie path.                                                                                  |
-| `sameSite`    | `"Strict" \| "Lax" \| "None"` | `"Lax"`           | Browser SameSite policy.                                                                      |
-| `secure`      | `boolean`                     | `true`            | Requires HTTPS when enabled. Set `false` only for local HTTP development.                     |
+| `domain`      | `string`                      | Browser host only | Optional cookie domain.                                                                        |
+| `path`        | String beginning with `/`     | `"/"`             | Cookie path.                                                                                   |
+| `sameSite`    | `"Strict" \| "Lax" \| "None"` | `"Lax"`           | Browser SameSite policy.                                                                       |
+| `secure`      | `boolean`                     | `true`            | Requires HTTPS when enabled. Set `false` only for local HTTP development.                      |
 
 Both cookies are always `HttpOnly`, expire with the authoritative session, and must use unique names. Deleting `__ctx` does not log the user out: the next authenticated API request validates `__ses` through the database and rebuilds the signed context. Deleting `__ses` ends browser authentication because `__ctx` is never accepted on its own.
 
@@ -688,11 +689,11 @@ export const nextAuth = createNextAuth({
 });
 ```
 
-| Property             | Type / allowed values            | Required | Default   | Description                                              |
-| -------------------- | -------------------------------- | :------: | --------- | -------------------------------------------------------- |
-| `renewUrl`           | Absolute `http:` or `https:` URL |    ✅    | —         | Trusted private API renewal endpoint.                    |
-| `cookie.sessionName` | Valid cookie name                |    ❌    | `"__ses"` | Session cookie read and forwarded to the API.            |
-| `cookie.contextName` | Valid cookie name                |    ❌    | `"__ctx"` | Signed context decoded only to schedule SSR renewal.     |
+| Property             | Type / allowed values            | Required | Default   | Description                                          |
+| -------------------- | -------------------------------- | :------: | --------- | ---------------------------------------------------- |
+| `renewUrl`           | Absolute `http:` or `https:` URL |    ✅    | —         | Trusted private API renewal endpoint.                |
+| `cookie.sessionName` | Valid cookie name                |    ❌    | `"__ses"` | Session cookie read and forwarded to the API.        |
+| `cookie.contextName` | Valid cookie name                |    ❌    | `"__ctx"` | Signed context decoded only to schedule SSR renewal. |
 
 ## Session flow
 
@@ -807,7 +808,7 @@ await auth.createSession({
 | Method                                                  | Purpose                                                                                           |
 | ------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
 | `auth.createSession({ account_id, context, country? })` | Creates the DB session and writes the browser cookies. `country` is optional login-time metadata. |
-| `auth.resolveSession(context)`                          | Resolves a request, renews inline when due, and returns the selected account and session.          |
+| `auth.resolveSession(context)`                          | Resolves a request, renews inline when due, and returns the selected account and session.         |
 | `auth.renewSession(context)`                            | Performs DB validation, renews when due, and writes authoritative cookies.                        |
 | `auth.revokeSession(context)`                           | Revokes the current DB session and clears cookies.                                                |
 | `auth.clearSession(context)`                            | Clears browser cookies without revoking the DB session.                                           |
@@ -832,7 +833,7 @@ app.get("/account", auth.requireSession, (_request, response) => {
 | Method                                                            | Purpose                                              |
 | ----------------------------------------------------------------- | ---------------------------------------------------- |
 | `auth.createSession({ account_id, request, response, country? })` | Creates the DB session and writes cookies.           |
-| `auth.resolveSession({ request, response })`                      | Resolves and automatically renews when due.           |
+| `auth.resolveSession({ request, response })`                      | Resolves and automatically renews when due.          |
 | `auth.renewSession({ request, response })`                        | Renews when due and writes authoritative cookies.    |
 | `auth.revokeSession({ request, response })`                       | Revokes the current session and clears cookies.      |
 | `auth.clearSession(response)`                                     | Clears cookies without revoking the DB session.      |
@@ -863,7 +864,7 @@ app.get("/account", { preHandler: auth.requireSession }, (request) => ({
 | -------------------------------------------------------------- | -------------------------------------------------------------- |
 | `auth.decorate(app)`                                           | Declares the native request decorators once at startup.        |
 | `auth.createSession({ account_id, request, reply, country? })` | Creates the DB session and writes cookies.                     |
-| `auth.resolveSession({ request, reply })`                      | Resolves and automatically renews when due.                     |
+| `auth.resolveSession({ request, reply })`                      | Resolves and automatically renews when due.                    |
 | `auth.renewSession({ request, reply })`                        | Renews when due and writes authoritative cookies.              |
 | `auth.revokeSession({ request, reply })`                       | Revokes the current session and clears cookies.                |
 | `auth.clearSession(reply)`                                     | Clears cookies without revoking the DB session.                |
