@@ -3,7 +3,7 @@
 [![Minified Size](https://img.shields.io/badge/minified-34.3_kB-007ec6)](https://bundlephobia.com/package/@gauts/auth)
 [![Minified and Gzipped Size](https://img.shields.io/badge/minified_%2B_gzip-14.4_kB-007ec6)](https://bundlephobia.com/package/@gauts/auth)
 
-Database-backed password authentication, opaque browser sessions, and optional social authentication for Node.js applications.
+Secure authentication for Node.js applications, with password login, persistent sessions, social providers, and adapters for popular frameworks and databases.
 
 `@gauts/auth` provides password hashing, session lifecycle, secure cookies, database validation, optional short caching, Prisma or Drizzle persistence, Hono/Express/Fastify integration, and Google/GitHub/X OAuth. The application keeps control of credential lookup, business-specific registration data, authorization, responses, and UI.
 

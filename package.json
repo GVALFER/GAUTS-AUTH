@@ -1,7 +1,7 @@
 {
     "name": "@gauts/auth",
     "version": "0.10.2",
-    "description": "Database-backed password, session, and social authentication for Node.js.",
+    "description": "Secure authentication for Node.js applications, with password login, persistent sessions, social providers, and adapters for popular frameworks and databases.",
     "license": "MIT",
     "author": "GVALFER",
     "repository": {
