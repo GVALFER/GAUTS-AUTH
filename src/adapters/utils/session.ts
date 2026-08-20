@@ -7,7 +7,7 @@ import {
     type SessionState,
 } from "../../session/state.js";
 import type { AuthAccount, ResolvedSession } from "../../session/types.js";
-import { createCookieHeader, getCookieValue, resolveHttpCookie } from "./cookie.js";
+import { createCookieHeader, getCookieValue, resolveHttpCookie } from "./httpCookie.js";
 import type { HttpRequestInput, HttpSessionAdapter, HttpSessionConfig } from "./types.js";
 
 type ResolveDbSessionInput<TResponse> = {

@@ -4,7 +4,7 @@ import type { SessionCookieNames } from "../../session/cookie.js";
 import type { SessionCacheConfig } from "../../session/state.js";
 import type { AuthAccount, DbAdapter, ResolvedSession, Session } from "../../session/types.js";
 import type { SocialConfig, SocialDbAdapter } from "../../social/types.js";
-import { resolveHttpCookie } from "../utils/cookie.js";
+import { resolveHttpCookie } from "../utils/httpCookie.js";
 import { requireSocialDb } from "../utils/social.js";
 import { createHttpSession } from "../utils/session.js";
 import type { HttpCookieConfig } from "../utils/types.js";

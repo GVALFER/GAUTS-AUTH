@@ -1,6 +1,6 @@
 {
     "name": "@gauts/auth",
-    "version": "0.10.3",
+    "version": "0.10.4",
     "description": "Secure authentication for Node.js applications, with password login, persistent sessions, social providers, and adapters for popular frameworks and databases.",
     "license": "MIT",
     "author": "GVALFER",
@@ -92,8 +92,7 @@
     },
     "dependencies": {
         "argon2": "^0.45.1",
-        "bcryptjs": "^3.0.2",
-        "cookie": "^2.0.1"
+        "bcryptjs": "^3.0.2"
     },
     "peerDependencies": {
         "drizzle-orm": "^0.45.2",

@@ -14,7 +14,6 @@ export type HttpCookieConfig = {
 
 export type HttpCookieOptions = {
     domain?: string;
-    httpOnly: true;
     path: string;
     sameSite: "Strict" | "Lax" | "None";
     secure: boolean;

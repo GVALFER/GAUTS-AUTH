@@ -20,7 +20,7 @@ import type {
     SocialProviderId,
 } from "../../social/types.js";
 import type { AuthAccount, DbAdapter } from "../../session/types.js";
-import { createCookieHeader, getCookieValue } from "./cookie.js";
+import { createCookieHeader, getCookieValue } from "./httpCookie.js";
 import type { HttpCookieOptions } from "./types.js";
 
 type HttpSocialConfig<TRequest, TResponse, TAccount extends AuthAccount, TData> = {
