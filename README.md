@@ -1,6 +1,6 @@
 # `@gauts/auth`
 
-[![Bundle Size](https://img.shields.io/bundlephobia/minzip/%40gauts%2Fauth)](https://bundlephobia.com/package/@gauts/auth)
+[![Unpacked Size](https://img.shields.io/npm/unpacked-size/%40gauts%2Fauth)](https://www.npmjs.com/package/@gauts/auth)
 
 Database-backed password authentication, opaque browser sessions, and optional social authentication for Node.js applications.
 
